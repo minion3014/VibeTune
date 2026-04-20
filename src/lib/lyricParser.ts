@@ -9,7 +9,6 @@ export function parseLRC(lrcContent: string): LyricLine[] {
   
   // Matches [mm:ss.xx], [mm:ss:xx], [mm:ss]
   const timeRegex = /\[(\d+):(\d+)(?:[:.](\d+))?\]/g;
-  const tagRegex = /\[([a-z]+):(.*)\]/;
 
   for (const line of lines) {
     let match;

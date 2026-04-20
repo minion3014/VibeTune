@@ -20,7 +20,8 @@ import {
   Sparkles,
   X,
   Loader2,
-  Save
+  Save,
+  User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseLRC, LyricLine } from './lib/lyricParser';
@@ -30,7 +31,6 @@ interface Song {
   id: string;
   name: string;
   audioUrl: string;
-  lyricUrl?: string;
   lyrics: LyricLine[];
   artist: string;
   cover: string;
@@ -49,7 +49,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
-  const [isFirstInteraction, setIsFirstInteraction] = useState(true);
+  const [activeTab, setActiveTab] = useState<'player' | 'playlist'>('player');
+  const [rootFolderName, setRootFolderName] = useState<string | null>(null);
   
   // AI Modal State
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -57,8 +58,8 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement>(null);
-  const lyricContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const currentSong = songs[currentSongIndex] || null;
 
@@ -72,10 +73,29 @@ export default function App() {
     setShowSearchSuggestions(true);
   };
 
+  // Handle click outside search to close suggestions
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowSearchSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   // Handle file selection from input
   const handleFiles = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+
+    // Get root folder name from the first file's path
+    const firstFilePath = files[0].webkitRelativePath || files[0].name;
+    const rootName = firstFilePath.split('/')[0] || 'Selected Folder';
+    setRootFolderName(rootName);
 
     const songMap = new Map<string, { audio?: File; lrc?: File; folder: string }>();
     const folderMap = new Map<string, Song[]>();
@@ -103,7 +123,7 @@ export default function App() {
     }
 
     const allLoadedSongs: Song[] = [];
-    for (const [pathKey, files] of songMap.entries()) {
+    for (const files of songMap.values()) {
       if (files.audio) {
         let lyrics: LyricLine[] = [];
         if (files.lrc) {
@@ -243,30 +263,14 @@ export default function App() {
     setIsPlaying(true);
   };
 
-  // Find current lyric line
+  // Find current lyric index based on current playback time
   const currentLyricIndex = useMemo(() => {
     if (!currentSong || currentSong.lyrics.length === 0) return -1;
-    const index = currentSong.lyrics.findIndex((line, i) => {
+    return currentSong.lyrics.findIndex((line, i) => {
       const nextLine = currentSong.lyrics[i + 1];
       return currentTime >= line.time && (!nextLine || currentTime < nextLine.time);
     });
-    return index;
   }, [currentSong, currentTime]);
-
-  // Scroll lyrics
-  useEffect(() => {
-    if (lyricContainerRef.current && currentLyricIndex !== -1) {
-      const activeLine = lyricContainerRef.current.children[currentLyricIndex] as HTMLElement;
-      if (activeLine) {
-        const containerHeight = lyricContainerRef.current.offsetHeight;
-        const scrollPos = activeLine.offsetTop - containerHeight / 2 + activeLine.offsetHeight / 2;
-        lyricContainerRef.current.scrollTo({
-          top: scrollPos,
-          behavior: 'smooth'
-        });
-      }
-    }
-  }, [currentLyricIndex]);
 
   const filteredSongs = songs.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -279,35 +283,36 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-purple-500/30 overflow-hidden flex flex-col">
       {/* Header */}
-      <header className="p-6 flex justify-between items-center bg-gradient-to-b from-black/50 to-transparent z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
-            <Music className="w-6 h-6 text-white" />
+      <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/20 backdrop-blur-md sticky top-0 z-[100]">
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
+            <Music className="w-5 h-5 md:w-6 md:h-6 text-white" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">VibeTune</h1>
+          <h1 className="text-lg md:text-2xl font-black tracking-tighter bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent hidden sm:block">
+            VIBETUNE
+          </h1>
         </div>
 
-        <div className="flex items-center gap-4 relative">
-          <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-purple-400 transition-colors" />
-            <input 
-              type="text" 
-              placeholder="Type to search in Music folder..."
-              value={searchQuery}
-              onFocus={handleSearchFocus}
-              onChange={handleSearchChange}
-              className="bg-white/5 border border-white/10 rounded-full py-2.5 pl-10 pr-4 w-[400px] focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:bg-white/10 transition-all text-sm shadow-inner"
-            />
-            
-            {/* Search Suggestions Dropdown */}
-            <AnimatePresence>
-              {showSearchSuggestions && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="absolute top-full left-0 right-0 mt-2 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
-                >
+        <div ref={searchContainerRef} className="flex-1 max-w-[400px] mx-4 relative group">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-purple-400 transition-colors" />
+          <input 
+            type="text" 
+            placeholder={rootFolderName ? `Search in ${rootFolderName}...` : "Search music..."}
+            value={searchQuery}
+            onFocus={handleSearchFocus}
+            onChange={handleSearchChange}
+            className="bg-white/5 border border-white/10 rounded-full py-2 md:py-2.5 pl-10 pr-4 w-full focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:bg-white/10 transition-all text-sm shadow-inner"
+          />
+          
+          {/* Search Suggestions Dropdown */}
+          <AnimatePresence>
+            {showSearchSuggestions && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="absolute top-full left-0 right-0 mt-2 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[110]"
+              >
                   <div className="p-2">
                     {allSongs.length === 0 ? (
                       <div className="p-1">
@@ -316,11 +321,11 @@ export default function App() {
                           className="w-full flex items-center gap-4 p-4 hover:bg-purple-600/20 text-white rounded-xl transition-all text-left group"
                         >
                           <div className="w-10 h-10 bg-purple-600/20 rounded-lg flex items-center justify-center group-hover:bg-purple-600 transition-colors">
-                            <Search className="w-5 h-5 text-purple-400 group-hover:text-white" />
+                            <FolderOpen className="w-5 h-5 text-purple-400 group-hover:text-white" />
                           </div>
                           <div className="flex-1">
-                            <p className="font-bold text-sm">Search "{searchQuery || 'Music'}" in local folder</p>
-                            <p className="text-[10px] text-gray-500">Path: C:\Users\minio\OneDrive\Music</p>
+                            <p className="font-bold text-sm">Open Local Folder</p>
+                            <p className="text-[10px] text-gray-500">{rootFolderName ? `Current: ${rootFolderName}` : 'Select a folder to start'}</p>
                           </div>
                         </button>
                       </div>
@@ -361,13 +366,41 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
+        </div>
+
+        <div className="flex items-center gap-2 md:gap-4">
+          <button 
+            onClick={() => setIsAiModalOpen(true)}
+            className="p-2 md:p-2.5 bg-white/5 hover:bg-white/10 rounded-full transition-all group"
+            title="AI Lyric Sync"
+          >
+            <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-purple-400 group-hover:scale-110 transition-transform" />
+          </button>
+          <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg">
+            <User className="w-5 h-5 md:w-6 md:h-6 text-gray-400" />
           </div>
         </div>
       </header>
 
-      <main className="flex-1 flex overflow-hidden p-6 gap-6">
-        {/* Left: Playlist */}
-        <div className="w-80 flex flex-col gap-4">
+      <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        {/* Mobile Tab Switcher */}
+        <div className="flex md:hidden border-b border-white/10 bg-black/40 backdrop-blur-md">
+          <button 
+            onClick={() => setActiveTab('player')}
+            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'player' ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-400/5' : 'text-gray-500'}`}
+          >
+            Now Playing
+          </button>
+          <button 
+            onClick={() => setActiveTab('playlist')}
+            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'playlist' ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-400/5' : 'text-gray-500'}`}
+          >
+            Playlist ({songs.length})
+          </button>
+        </div>
+
+        {/* Sidebar / Playlist */}
+        <div className={`${activeTab === 'playlist' ? 'flex' : 'hidden'} md:flex w-full md:w-80 border-r border-white/10 flex-col bg-black/20 backdrop-blur-sm overflow-hidden`}>
           <div className="flex items-center justify-between px-2">
             <div className="flex items-center gap-2 text-gray-400">
               <ListMusic className="w-4 h-4" />
@@ -441,7 +474,7 @@ export default function App() {
         </div>
 
         {/* Center: Main Player / Lyrics */}
-        <div className="flex-1 flex flex-col bg-white/5 rounded-3xl border border-white/10 overflow-hidden relative">
+        <div className={`${activeTab === 'player' ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-white/5 rounded-3xl border border-white/10 overflow-hidden relative`}>
           <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-transparent to-blue-900/20 pointer-events-none" />
           
           <div className="flex-1 flex flex-col md:flex-row p-8 gap-12 items-center overflow-hidden">
@@ -545,12 +578,12 @@ export default function App() {
       </main>
 
       {/* Bottom Player Bar */}
-      <footer className="p-6 bg-black/80 backdrop-blur-xl border-t border-white/10 z-20">
-        <div className="max-w-7xl mx-auto flex flex-col gap-4">
+      <footer className="h-24 md:h-32 bg-black/80 backdrop-blur-xl border-t border-white/10 z-20 p-4 md:p-6">
+        <div className="max-w-7xl mx-auto flex flex-col gap-2 md:gap-4">
           {/* Progress Bar */}
-          <div className="flex items-center gap-4 group">
-            <span className="text-xs font-mono text-gray-500 w-10 text-right">{formatTime(currentTime)}</span>
-            <div className="flex-1 relative h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div className="flex items-center gap-3 md:gap-4 group">
+            <span className="text-[10px] md:text-xs font-mono text-gray-500 w-8 md:w-10 text-right">{formatTime(currentTime)}</span>
+            <div className="flex-1 relative h-1 md:h-1.5 bg-white/10 rounded-full overflow-hidden">
               <input 
                 type="range" 
                 min="0" 
@@ -563,17 +596,13 @@ export default function App() {
                 className="absolute inset-y-0 left-0 bg-gradient-to-r from-purple-600 to-blue-500 rounded-full"
                 style={{ width: `${(currentTime / duration) * 100}%` }}
               />
-              <div 
-                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
-              />
             </div>
-            <span className="text-xs font-mono text-gray-500 w-10">{formatTime(duration)}</span>
+            <span className="text-[10px] md:text-xs font-mono text-gray-500 w-8 md:w-10">{formatTime(duration)}</span>
           </div>
 
           <div className="flex items-center justify-between">
             {/* Song Info */}
-            <div className="flex items-center gap-4 w-1/3">
+            <div className="flex items-center gap-3 md:gap-4 w-1/4 md:w-1/3 overflow-hidden">
               <AnimatePresence mode="wait">
                 {currentSong && (
                   <motion.div 
@@ -581,17 +610,17 @@ export default function App() {
                     initial={{ x: -20, opacity: 0 }}
                     animate={{ x: 0, opacity: 1 }}
                     exit={{ x: 20, opacity: 0 }}
-                    className="flex items-center gap-3"
+                    className="flex items-center gap-2 md:gap-3 overflow-hidden"
                   >
                     <img 
                       src={currentSong.cover} 
                       alt="Cover" 
-                      className="w-14 h-14 rounded-lg object-cover shadow-lg"
+                      className="w-10 h-10 md:w-14 md:h-14 rounded-lg object-cover shadow-lg shrink-0"
                       referrerPolicy="no-referrer"
                     />
-                    <div className="overflow-hidden">
-                      <h3 className="font-bold truncate text-white">{currentSong.name}</h3>
-                      <p className="text-sm text-gray-400 truncate">{currentSong.artist}</p>
+                    <div className="overflow-hidden hidden sm:block">
+                      <h3 className="font-bold truncate text-white text-xs md:text-base">{currentSong.name}</h3>
+                      <p className="text-[10px] md:text-sm text-gray-400 truncate">{currentSong.artist}</p>
                     </div>
                   </motion.div>
                 )}
@@ -599,31 +628,31 @@ export default function App() {
             </div>
 
             {/* Controls */}
-            <div className="flex items-center gap-8">
+            <div className="flex items-center gap-4 md:gap-8">
               <button 
                 onClick={prevSong}
-                className="text-gray-400 hover:text-white transition-colors p-2"
+                className="text-gray-400 hover:text-white transition-colors p-1 md:p-2"
               >
-                <SkipBack className="w-6 h-6 fill-current" />
+                <SkipBack className="w-5 h-5 md:w-6 md:h-6 fill-current" />
               </button>
               <button 
                 onClick={togglePlay}
-                className="w-14 h-14 bg-white text-black rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-xl shadow-white/10"
+                className="w-10 h-10 md:w-14 md:h-14 bg-white text-black rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-xl shadow-white/10"
               >
-                {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
+                {isPlaying ? <Pause className="w-5 h-5 md:w-6 md:h-6 fill-current" /> : <Play className="w-5 h-5 md:w-6 md:h-6 fill-current ml-1" />}
               </button>
               <button 
                 onClick={nextSong}
-                className="text-gray-400 hover:text-white transition-colors p-2"
+                className="text-gray-400 hover:text-white transition-colors p-1 md:p-2"
               >
-                <SkipForward className="w-6 h-6 fill-current" />
+                <SkipForward className="w-5 h-5 md:w-6 md:h-6 fill-current" />
               </button>
             </div>
 
             {/* Volume */}
-            <div className="flex items-center gap-3 w-1/3 justify-end">
-              <Volume2 className="w-5 h-5 text-gray-400" />
-              <div className="w-32 h-1 bg-white/10 rounded-full relative group overflow-hidden">
+            <div className="flex items-center gap-3 w-1/4 md:w-1/3 justify-end">
+              <Volume2 className="w-4 h-4 md:w-5 md:h-5 text-gray-400" />
+              <div className="w-16 md:w-32 h-1 bg-white/10 rounded-full relative group overflow-hidden hidden xs:block">
                 <input 
                   type="range" 
                   min="0" 
