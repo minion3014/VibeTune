@@ -21,7 +21,8 @@ import {
   X,
   Loader2,
   Save,
-  User
+  User,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseLRC, LyricLine } from './lib/lyricParser';
@@ -248,6 +249,16 @@ export default function App() {
     setCurrentTime(time);
     if (audioRef.current) {
       audioRef.current.currentTime = time;
+    }
+  };
+
+  const handleReplay = () => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      setCurrentTime(0);
+      if (!isPlaying) {
+        setIsPlaying(true);
+      }
     }
   };
 
@@ -628,7 +639,14 @@ export default function App() {
             </div>
 
             {/* Controls */}
-            <div className="flex items-center gap-4 md:gap-8">
+            <div className="flex items-center gap-2 md:gap-6">
+              <button 
+                onClick={handleReplay}
+                className="text-gray-400 hover:text-purple-400 transition-colors p-1 md:p-2"
+                title="Replay"
+              >
+                <RotateCcw className="w-4 h-4 md:w-5 md:h-5" />
+              </button>
               <button 
                 onClick={prevSong}
                 className="text-gray-400 hover:text-white transition-colors p-1 md:p-2"
