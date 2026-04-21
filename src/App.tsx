@@ -21,6 +21,7 @@ import {
   Mic2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as mm from 'music-metadata-browser';
 import { parseLRC, LyricLine } from './lib/lyricParser';
 
 interface Song {
@@ -126,11 +127,20 @@ export default function App() {
           }
         }
 
+        let artist = files.folder;
+        try {
+          const metadata = await mm.parseBlob(files.audio);
+          // Prioritize composer (nhạc sĩ) then artist (ca sĩ) then folder name
+          artist = metadata.common.composer || metadata.common.artist || files.folder;
+        } catch (e) {
+          console.warn(`Error parsing metadata for ${files.audio.name}:`, e);
+        }
+
         const fileName = files.audio.name.substring(0, files.audio.name.lastIndexOf('.'));
         const song: Song = {
           id: Math.random().toString(36).substr(2, 9),
           name: fileName,
-          artist: files.folder, // Use folder name as artist for better organization
+          artist,
           audioUrl: URL.createObjectURL(files.audio),
           lyrics,
           cover: `https://picsum.photos/seed/${fileName}/400/400`,
