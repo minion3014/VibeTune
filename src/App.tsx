@@ -22,7 +22,10 @@ import {
   Loader2,
   Save,
   User,
-  RotateCcw
+  RotateCcw,
+  Shuffle,
+  Repeat,
+  Mic2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseLRC, LyricLine } from './lib/lyricParser';
@@ -52,6 +55,8 @@ export default function App() {
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [activeTab, setActiveTab] = useState<'player' | 'playlist'>('player');
   const [rootFolderName, setRootFolderName] = useState<string | null>(null);
+  const [playbackMode, setPlaybackMode] = useState<'normal' | 'shuffle' | 'repeat'>('normal');
+  const [showLyricsView, setShowLyricsView] = useState(false);
   
   // AI Modal State
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -264,12 +269,38 @@ export default function App() {
 
   const nextSong = () => {
     if (songs.length === 0) return;
-    setCurrentSongIndex((prev) => (prev + 1) % songs.length);
+    
+    if (playbackMode === 'repeat') {
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(e => console.error("Playback failed", e));
+      }
+      setIsPlaying(true);
+      return;
+    }
+
+    if (playbackMode === 'shuffle') {
+      let nextIndex = Math.floor(Math.random() * songs.length);
+      if (songs.length > 1 && nextIndex === currentSongIndex) {
+        nextIndex = (nextIndex + 1) % songs.length;
+      }
+      setCurrentSongIndex(nextIndex);
+    } else {
+      setCurrentSongIndex((prev) => (prev + 1) % songs.length);
+    }
     setIsPlaying(true);
   };
 
   const prevSong = () => {
     if (songs.length === 0) return;
+    
+    // If more than 3 seconds, just restart current song
+    if (audioRef.current && audioRef.current.currentTime > 3) {
+      audioRef.current.currentTime = 0;
+      setCurrentTime(0);
+      return;
+    }
+
     setCurrentSongIndex((prev) => (prev - 1 + songs.length) % songs.length);
     setIsPlaying(true);
   };
@@ -292,11 +323,11 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-purple-500/30 overflow-hidden flex flex-col">
+    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden flex flex-col">
       {/* Header */}
       <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/20 backdrop-blur-md sticky top-0 z-[100]">
         <div className="flex items-center gap-2 md:gap-3">
-          <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
+          <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
             <Music className="w-5 h-5 md:w-6 md:h-6 text-white" />
           </div>
           <h1 className="text-lg md:text-2xl font-black tracking-tighter bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent hidden sm:block">
@@ -305,14 +336,14 @@ export default function App() {
         </div>
 
         <div ref={searchContainerRef} className="flex-1 max-w-[400px] mx-4 relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-purple-400 transition-colors" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-400 transition-colors" />
           <input 
             type="text" 
             placeholder={rootFolderName ? `Search in ${rootFolderName}...` : "Search music..."}
             value={searchQuery}
             onFocus={handleSearchFocus}
             onChange={handleSearchChange}
-            className="bg-white/5 border border-white/10 rounded-full py-2 md:py-2.5 pl-10 pr-4 w-full focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:bg-white/10 transition-all text-sm shadow-inner"
+            className="bg-white/5 border border-white/10 rounded-full py-2 md:py-2.5 pl-10 pr-4 w-full focus:outline-none focus:ring-2 focus:ring-[#0070f3]/50 focus:bg-white/10 transition-all text-sm shadow-inner"
           />
           
           {/* Search Suggestions Dropdown */}
@@ -329,10 +360,10 @@ export default function App() {
                       <div className="p-1">
                         <button 
                           onClick={triggerFileSelect}
-                          className="w-full flex items-center gap-4 p-4 hover:bg-purple-600/20 text-white rounded-xl transition-all text-left group"
+                          className="w-full flex items-center gap-4 p-4 hover:bg-blue-600/20 text-white rounded-xl transition-all text-left group"
                         >
-                          <div className="w-10 h-10 bg-purple-600/20 rounded-lg flex items-center justify-center group-hover:bg-purple-600 transition-colors">
-                            <FolderOpen className="w-5 h-5 text-purple-400 group-hover:text-white" />
+                          <div className="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center group-hover:bg-blue-600 transition-colors">
+                            <FolderOpen className="w-5 h-5 text-blue-400 group-hover:text-white" />
                           </div>
                           <div className="flex-1">
                             <p className="font-bold text-sm">Open Local Folder</p>
@@ -344,7 +375,7 @@ export default function App() {
                       <>
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest flex justify-between items-center">
                           <span>Folders Found</span>
-                          <button onClick={triggerFileSelect} className="text-purple-400 hover:underline text-[9px]">Change Root</button>
+                          <button onClick={triggerFileSelect} className="text-blue-400 hover:underline text-[9px]">Change Root</button>
                         </div>
                         
                         {folderSuggestions.length > 0 ? (
@@ -353,13 +384,13 @@ export default function App() {
                               <button 
                                 key={name}
                                 onClick={() => selectFolder(name)}
-                                className="w-full flex items-center gap-3 p-3 hover:bg-purple-600/20 text-white rounded-xl transition-all text-sm text-left group"
+                                className="w-full flex items-center gap-3 p-3 hover:bg-blue-600/20 text-white rounded-xl transition-all text-sm text-left group"
                               >
-                                <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center group-hover:bg-purple-500/20 transition-colors">
-                                  <FolderOpen className="w-5 h-5 text-gray-400 group-hover:text-purple-400" />
+                                <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
+                                  <FolderOpen className="w-5 h-5 text-gray-400 group-hover:text-blue-400" />
                                 </div>
                                 <div className="flex-1 truncate">
-                                  <p className="font-bold truncate group-hover:text-purple-300 transition-colors">{name}</p>
+                                  <p className="font-bold truncate group-hover:text-blue-300 transition-colors">{name}</p>
                                   <p className="text-[11px] text-gray-500">{folders.get(name)?.length} tracks</p>
                                 </div>
                               </button>
@@ -385,7 +416,7 @@ export default function App() {
             className="p-2 md:p-2.5 bg-white/5 hover:bg-white/10 rounded-full transition-all group"
             title="AI Lyric Sync"
           >
-            <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-purple-400 group-hover:scale-110 transition-transform" />
+            <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-blue-400 group-hover:scale-110 transition-transform" />
           </button>
           <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg">
             <User className="w-5 h-5 md:w-6 md:h-6 text-gray-400" />
@@ -398,13 +429,13 @@ export default function App() {
         <div className="flex md:hidden border-b border-white/10 bg-black/40 backdrop-blur-md">
           <button 
             onClick={() => setActiveTab('player')}
-            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'player' ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-400/5' : 'text-gray-500'}`}
+            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'player' ? 'text-[#0070f3] border-b-2 border-[#0070f3] bg-[#0070f3]/5' : 'text-gray-500'}`}
           >
             Now Playing
           </button>
           <button 
             onClick={() => setActiveTab('playlist')}
-            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'playlist' ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-400/5' : 'text-gray-500'}`}
+            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'playlist' ? 'text-[#0070f3] border-b-2 border-[#0070f3] bg-[#0070f3]/5' : 'text-gray-500'}`}
           >
             Playlist ({songs.length})
           </button>
@@ -430,13 +461,13 @@ export default function App() {
           </div>
           
           {currentFolder && (
-            <div className="mx-2 p-3 bg-purple-600/10 border border-purple-500/20 rounded-xl flex items-center gap-3">
-              <FolderOpen className="w-4 h-4 text-purple-400" />
+            <div className="mx-2 p-3 bg-[#0070f3]/10 border border-[#0070f3]/20 rounded-xl flex items-center gap-3">
+              <FolderOpen className="w-4 h-4 text-blue-400" />
               <div className="flex-1 overflow-hidden">
-                <p className="text-xs font-bold text-purple-400 truncate">{currentFolder}</p>
-                <p className="text-[10px] text-purple-400/60">{songs.length} songs</p>
+                <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
+                <p className="text-[10px] text-blue-400/60">{songs.length} songs</p>
               </div>
-              <button onClick={resetFilter} className="text-purple-400 hover:text-white">
+              <button onClick={resetFilter} className="text-blue-400 hover:text-white">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -457,7 +488,7 @@ export default function App() {
                   }}
                   className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group ${
                     currentSong?.id === song.id 
-                      ? 'bg-purple-600/20 text-purple-400 border border-purple-500/20' 
+                      ? 'bg-[#0070f3]/20 text-[#0070f3] border border-[#0070f3]/20' 
                       : 'hover:bg-white/5 text-gray-400 hover:text-white'
                   }`}
                 >
@@ -473,9 +504,9 @@ export default function App() {
                   </div>
                   {currentSong?.id === song.id && isPlaying && (
                     <div className="flex gap-0.5 items-end h-3">
-                      <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-0.5 bg-purple-400" />
-                      <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-0.5 bg-purple-400" />
-                      <motion.div animate={{ height: [4, 10, 4] }} transition={{ repeat: Infinity, duration: 0.7 }} className="w-0.5 bg-purple-400" />
+                      <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-0.5 bg-[#0070f3]" />
+                      <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-0.5 bg-[#0070f3]" />
+                      <motion.div animate={{ height: [4, 10, 4] }} transition={{ repeat: Infinity, duration: 0.7 }} className="w-0.5 bg-[#0070f3]" />
                     </div>
                   )}
                 </button>
@@ -485,211 +516,201 @@ export default function App() {
         </div>
 
         {/* Center: Main Player / Lyrics */}
-        <div className={`${activeTab === 'player' ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-white/5 rounded-3xl border border-white/10 overflow-hidden relative`}>
-          <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-transparent to-blue-900/20 pointer-events-none" />
+        <div className={`${activeTab === 'player' ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-[#110c1c] overflow-hidden relative`}>
+          <div className="absolute inset-0 bg-gradient-to-br from-[#1a1427] to-[#0a0a0a] pointer-events-none" />
           
-          <div className="flex-1 flex flex-col md:flex-row p-8 gap-12 items-center overflow-hidden">
-            {/* Album Art */}
-            <div className={`flex-1 flex justify-center transition-all duration-700 ${isFullScreen ? 'hidden' : 'flex'}`}>
-              <motion.div 
-                key={currentSong?.id}
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="relative group"
-              >
-                <div className="absolute -inset-4 bg-purple-600/20 blur-3xl rounded-full opacity-50 group-hover:opacity-80 transition-opacity" />
-                <img 
-                  src={currentSong?.cover || 'https://picsum.photos/seed/music/800/800'} 
-                  alt="Cover" 
-                  className={`w-64 h-64 md:w-80 md:h-80 rounded-2xl object-cover shadow-2xl relative z-10 transition-transform duration-500 ${isPlaying ? 'scale-105' : 'scale-100'}`}
-                  referrerPolicy="no-referrer"
-                />
-                <button className="absolute top-4 right-4 z-20 p-2 bg-black/40 backdrop-blur-md rounded-full text-white/80 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100">
-                  <Heart className="w-5 h-5" />
-                </button>
-              </motion.div>
-            </div>
-
-            {/* Lyrics Panel */}
-            <div className={`flex-1 h-full flex flex-col ${isFullScreen ? 'w-full' : ''}`}>
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-lg font-semibold text-gray-400 flex items-center gap-2">
-                  <Music className="w-4 h-4" />
-                  Lyrics
-                </h2>
-                <div className="flex items-center gap-2">
-                  {currentSong && (
-                    <button 
-                      onClick={() => setIsAiModalOpen(true)}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 rounded-lg text-xs font-medium transition-all border border-purple-500/20"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      AI Sync
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => setIsFullScreen(!isFullScreen)}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
-                  >
-                    {isFullScreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              <div 
-                className="flex-1 flex flex-col items-center justify-center space-y-8 overflow-hidden"
-              >
-                <AnimatePresence mode="wait">
-                  {currentSong?.lyrics && currentSong.lyrics.length > 0 ? (
-                    <motion.div 
-                      key={currentLyricIndex}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      className="flex flex-col items-center justify-center space-y-8 w-full"
-                    >
-                      {/* Previous Line */}
-                      {currentLyricIndex > 0 && (
-                        <p className="text-lg md:text-xl font-medium text-gray-600 opacity-40 text-center line-clamp-2 px-4">
-                          {currentSong.lyrics[currentLyricIndex - 1].text}
-                        </p>
-                      )}
-                      
-                      {/* Current Line */}
-                      <p className="text-2xl md:text-4xl font-bold text-white text-center px-4 leading-tight drop-shadow-lg">
-                        {currentSong.lyrics[currentLyricIndex === -1 ? 0 : currentLyricIndex].text}
-                      </p>
-
-                      {/* Next Line */}
-                      {currentLyricIndex < currentSong.lyrics.length - 1 && (
-                        <p className="text-lg md:text-xl font-medium text-gray-600 opacity-40 text-center line-clamp-2 px-4">
-                          {currentSong.lyrics[currentLyricIndex === -1 ? 1 : currentLyricIndex + 1].text}
-                        </p>
-                      )}
-                    </motion.div>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-500 italic gap-4">
-                      <p>{currentSong ? 'No lyrics available for this song.' : 'Select a song to see lyrics.'}</p>
-                      {currentSong && (
-                        <button 
-                          onClick={() => setIsAiModalOpen(true)}
-                          className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl text-sm transition-all border border-white/10"
-                        >
-                          <Sparkles className="w-4 h-4 text-purple-400" />
-                          Add Lyrics with AI
-                        </button>
-                      )}
+          <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 z-10 relative w-full h-full">
+            <AnimatePresence mode="wait">
+              {!showLyricsView ? (
+                // Album Art View
+                <motion.div 
+                  key="album-art"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.05 }}
+                  transition={{ duration: 0.4 }}
+                  className="relative group max-w-sm md:max-w-md aspect-square w-full"
+                >
+                  <img 
+                    src={currentSong?.cover || 'https://picsum.photos/seed/music/800/800'} 
+                    alt="Cover" 
+                    className="w-full h-full rounded-2xl object-cover shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative z-10"
+                    referrerPolicy="no-referrer"
+                  />
+                  
+                  {/* Visualizer Icon Overlay */}
+                  {isPlaying && (
+                    <div className="absolute bottom-6 left-6 z-20 flex items-end gap-1.5 px-4 py-3 bg-black/40 backdrop-blur-xl rounded-xl border border-white/10">
+                      <motion.div animate={{ height: [6, 18, 6] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-1.5 bg-white rounded-full" />
+                      <motion.div animate={{ height: [12, 6, 12] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-1.5 bg-white rounded-full" />
+                      <motion.div animate={{ height: [6, 15, 6] }} transition={{ repeat: Infinity, duration: 0.7 }} className="w-1.5 bg-white rounded-full" />
                     </div>
                   )}
-                </AnimatePresence>
-              </div>
-            </div>
+                </motion.div>
+              ) : (
+                // Lyrics View
+                <motion.div 
+                  key="lyrics-view"
+                  initial={{ opacity: 0, scale: 1.05 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.4 }}
+                  className="w-full max-w-4xl h-full flex flex-col justify-center"
+                >
+                  <div className="flex flex-col items-center justify-center space-y-8 md:space-y-12">
+                    <AnimatePresence mode="wait">
+                      {currentSong?.lyrics && currentSong.lyrics.length > 0 ? (
+                        <motion.div 
+                          key={currentLyricIndex}
+                          initial={{ opacity: 0, y: 30 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -30 }}
+                          className="flex flex-col items-center space-y-8 md:space-y-12 w-full"
+                        >
+                          {/* Previous Line */}
+                          {currentLyricIndex > 0 ? (
+                            <p className="text-xl md:text-3xl font-bold text-white/10 text-center line-clamp-1 max-w-[90%] blur-[1px]">
+                              {currentSong.lyrics[currentLyricIndex - 1].text}
+                            </p>
+                          ) : (
+                            <div className="h-10 md:h-12 invisible" />
+                          )}
+                          
+                          {/* Current Line */}
+                          <p className="text-2xl md:text-4xl lg:text-5xl font-black text-[#fbbf24] text-center drop-shadow-[0_0_30px_rgba(251,191,36,0.4)] leading-tight max-w-full px-4">
+                            {currentSong.lyrics[currentLyricIndex === -1 ? 0 : currentLyricIndex].text}
+                          </p>
+
+                          {/* Next Line */}
+                          {currentLyricIndex < currentSong.lyrics.length - 1 ? (
+                            <p className="text-xl md:text-3xl font-bold text-white/20 text-center line-clamp-1 max-w-[90%] blur-[0.5px]">
+                              {currentSong.lyrics[currentLyricIndex === -1 ? 1 : currentLyricIndex + 1].text}
+                            </p>
+                          ) : (
+                            <div className="h-10 md:h-12 invisible" />
+                          )}
+                        </motion.div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full text-gray-500 italic gap-6 text-center">
+                          <p className="text-xl">{currentSong ? 'No lyrics available for this song.' : 'Select a song to see lyrics.'}</p>
+                          {currentSong && (
+                            <button 
+                              onClick={() => setIsAiModalOpen(true)}
+                              className="flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl text-base font-semibold transition-all border border-white/10 group"
+                            >
+                              <Sparkles className="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
+                              Generate Lyrics with AI
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Lyric Toggle Button - Bottom Right of Player Area */}
+            <button 
+              onClick={() => setShowLyricsView(!showLyricsView)}
+              className={`absolute bottom-4 right-4 md:bottom-8 md:right-8 p-3 md:p-4 rounded-full transition-all z-30 shadow-2xl backdrop-blur-md group ${showLyricsView ? 'bg-[#0070f3] text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/10'}`}
+              title="Toggle Lyrics"
+            >
+              <Mic2 className={`w-5 h-5 md:w-6 md:h-6 ${showLyricsView ? 'animate-pulse' : 'group-hover:scale-110 transition-transform'}`} />
+            </button>
           </div>
         </div>
       </main>
 
       {/* Bottom Player Bar */}
-      <footer className="h-24 md:h-32 bg-black/80 backdrop-blur-xl border-t border-white/10 z-20 p-4 md:p-6">
-        <div className="max-w-7xl mx-auto flex flex-col gap-2 md:gap-4">
-          {/* Progress Bar */}
-          <div className="flex items-center gap-3 md:gap-4 group">
-            <span className="text-[10px] md:text-xs font-mono text-gray-500 w-8 md:w-10 text-right">{formatTime(currentTime)}</span>
-            <div className="flex-1 relative h-1 md:h-1.5 bg-white/10 rounded-full overflow-hidden">
+      <footer className="bg-[#0a0a0a]/90 backdrop-blur-2xl border-t border-white/5 z-20 px-6 py-6 h-auto">
+        <div className="max-w-3xl mx-auto flex flex-col items-center gap-4">
+          
+          {/* Song Title & Artist */}
+          <div className="text-center">
+            <AnimatePresence mode="wait">
+              {currentSong && (
+                <motion.div
+                  key={currentSong.id}
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: -10, opacity: 0 }}
+                >
+                  <h3 className="text-base md:text-lg font-bold text-white tracking-wide">
+                    {currentSong.name} <span className="text-gray-500 font-normal"> - {currentSong.artist}</span>
+                  </h3>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Progress Bar Container */}
+          <div className="w-full flex items-center gap-4">
+            <span className="text-[10px] md:text-xs font-medium text-blue-500/70 w-10 text-right">{formatTime(currentTime)}</span>
+            <div className="flex-1 relative h-1.5 md:h-1 bg-white/10 rounded-full">
               <input 
                 type="range" 
                 min="0" 
                 max={duration || 0} 
+                step="0.1"
                 value={currentTime} 
                 onChange={handleSeek}
-                className="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
+                className="absolute inset-0 w-full opacity-0 cursor-pointer z-20 appearance-none bg-transparent"
               />
               <motion.div 
-                className="absolute inset-y-0 left-0 bg-gradient-to-r from-purple-600 to-blue-500 rounded-full"
+                className="absolute inset-y-0 left-0 bg-[#0070f3] rounded-full shadow-[0_0_20px_rgba(0,112,243,0.7)]"
                 style={{ width: `${(currentTime / duration) * 100}%` }}
-              />
+              >
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 bg-white border-2 border-[#0070f3] rounded-full shadow-[0_0_15px_rgba(0,112,243,0.9)] z-30" />
+              </motion.div>
             </div>
-            <span className="text-[10px] md:text-xs font-mono text-gray-500 w-8 md:w-10">{formatTime(duration)}</span>
+            <span className="text-[10px] md:text-xs font-medium text-blue-500/70 w-10">{formatTime(duration)}</span>
           </div>
 
-          <div className="flex items-center justify-between">
-            {/* Song Info */}
-            <div className="flex items-center gap-3 md:gap-4 w-1/4 md:w-1/3 overflow-hidden">
-              <AnimatePresence mode="wait">
-                {currentSong && (
-                  <motion.div 
-                    key={currentSong.id}
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    exit={{ x: 20, opacity: 0 }}
-                    className="flex items-center gap-2 md:gap-3 overflow-hidden"
-                  >
-                    <img 
-                      src={currentSong.cover} 
-                      alt="Cover" 
-                      className="w-10 h-10 md:w-14 md:h-14 rounded-lg object-cover shadow-lg shrink-0"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="overflow-hidden hidden sm:block">
-                      <h3 className="font-bold truncate text-white text-xs md:text-base">{currentSong.name}</h3>
-                      <p className="text-[10px] md:text-sm text-gray-400 truncate">{currentSong.artist}</p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+          {/* Main Controls Overlay */}
+          <div className="flex items-center gap-6 md:gap-10 mt-2">
+            {/* Combined Shuffle/Repeat Toggle */}
+            <button 
+              onClick={() => {
+                const modes: ('normal' | 'shuffle' | 'repeat')[] = ['normal', 'shuffle', 'repeat'];
+                const nextMode = modes[(modes.indexOf(playbackMode) + 1) % modes.length];
+                setPlaybackMode(nextMode);
+              }}
+              className={`p-2 rounded-full transition-all flex items-center justify-center relative ${playbackMode !== 'normal' ? 'bg-[#0070f3]/20 text-[#0070f3]' : 'text-gray-500 hover:text-white'}`}
+              title={playbackMode === 'shuffle' ? 'Shuffle' : playbackMode === 'repeat' ? 'Repeat' : 'Normal'}
+            >
+              {playbackMode === 'repeat' ? (
+                <Repeat className="w-5 h-5 md:w-6 md:h-6" />
+              ) : (
+                <Shuffle className={`w-5 h-5 md:w-6 md:h-6 ${playbackMode === 'shuffle' ? 'opacity-100' : 'opacity-100'}`} />
+              )}
+            </button>
 
-            {/* Controls */}
-            <div className="flex items-center gap-2 md:gap-6">
-              <button 
-                onClick={handleReplay}
-                className="text-gray-400 hover:text-purple-400 transition-colors p-1 md:p-2"
-                title="Replay"
-              >
-                <RotateCcw className="w-4 h-4 md:w-5 md:h-5" />
-              </button>
-              <button 
-                onClick={prevSong}
-                className="text-gray-400 hover:text-white transition-colors p-1 md:p-2"
-              >
-                <SkipBack className="w-5 h-5 md:w-6 md:h-6 fill-current" />
-              </button>
-              <button 
-                onClick={togglePlay}
-                className="w-10 h-10 md:w-14 md:h-14 bg-white text-black rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-xl shadow-white/10"
-              >
-                {isPlaying ? <Pause className="w-5 h-5 md:w-6 md:h-6 fill-current" /> : <Play className="w-5 h-5 md:w-6 md:h-6 fill-current ml-1" />}
-              </button>
-              <button 
-                onClick={nextSong}
-                className="text-gray-400 hover:text-white transition-colors p-1 md:p-2"
-              >
-                <SkipForward className="w-5 h-5 md:w-6 md:h-6 fill-current" />
-              </button>
-            </div>
-
-            {/* Volume */}
-            <div className="flex items-center gap-3 w-1/4 md:w-1/3 justify-end">
-              <Volume2 className="w-4 h-4 md:w-5 md:h-5 text-gray-400" />
-              <div className="w-16 md:w-32 h-1 bg-white/10 rounded-full relative group overflow-hidden hidden xs:block">
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.01" 
-                  value={volume}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    setVolume(v);
-                    if (audioRef.current) audioRef.current.volume = v;
-                  }}
-                  className="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
-                />
-                <div 
-                  className="absolute inset-y-0 left-0 bg-white rounded-full"
-                  style={{ width: `${volume * 100}%` }}
-                />
-              </div>
-            </div>
+            <button 
+              onClick={prevSong}
+              className="text-[#0070f3] hover:scale-110 transition-transform p-1 drop-shadow-[0_0_8px_rgba(0,112,243,0.5)]"
+            >
+              <SkipBack className="w-6 h-6 md:w-8 md:h-8 fill-current" />
+            </button>
+            <button 
+              onClick={togglePlay}
+              className="w-12 h-12 md:w-16 md:h-16 border-2 border-[#0070f3]/40 text-[#0070f3] rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all bg-[#0070f3]/5 shadow-[0_0_20px_rgba(0,112,243,0.2)]"
+            >
+              {isPlaying ? <Pause className="w-6 h-6 md:w-8 md:h-8 fill-current" /> : <Play className="w-6 h-6 md:w-8 md:h-8 fill-current ml-1" />}
+            </button>
+            <button 
+              onClick={nextSong}
+              className="text-[#0070f3] hover:scale-110 transition-transform p-1 drop-shadow-[0_0_8px_rgba(0,112,243,0.5)]"
+            >
+              <SkipForward className="w-6 h-6 md:w-8 md:h-8 fill-current" />
+            </button>
+            <button 
+              onClick={handleReplay}
+              className="text-[#0070f3]/60 hover:text-[#0070f3] transition-colors"
+              title="Replay"
+            >
+              <RotateCcw className="w-4 h-4 md:w-5 md:h-5" />
+            </button>
           </div>
         </div>
       </footer>
@@ -711,9 +732,9 @@ export default function App() {
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
               className="bg-[#1a1a1a] border border-white/10 w-full max-w-2xl rounded-3xl overflow-hidden relative z-10 shadow-2xl"
             >
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-gradient-to-r from-purple-600/10 to-blue-600/10">
+              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-gradient-to-r from-blue-600/10 to-cyan-600/10">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center">
+                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
                     <Sparkles className="w-5 h-5 text-white" />
                   </div>
                   <div>
@@ -736,15 +757,15 @@ export default function App() {
                     value={rawLyricsInput}
                     onChange={(e) => setRawLyricsInput(e.target.value)}
                     placeholder="Paste your raw lyrics here..."
-                    className="w-full h-64 bg-white/5 border border-white/10 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:bg-white/10 transition-all resize-none custom-scrollbar text-sm"
+                    className="w-full h-64 bg-white/5 border border-white/10 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white/10 transition-all resize-none custom-scrollbar text-sm"
                   />
                 </div>
                 
-                <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 flex gap-3">
-                  <div className="p-2 bg-purple-500/20 rounded-lg h-fit">
-                    <Sparkles className="w-4 h-4 text-purple-400" />
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex gap-3">
+                  <div className="p-2 bg-blue-500/20 rounded-lg h-fit">
+                    <Sparkles className="w-4 h-4 text-blue-400" />
                   </div>
-                  <p className="text-xs text-purple-300 leading-relaxed">
+                  <p className="text-xs text-blue-300 leading-relaxed">
                     Gemini AI will estimate the timestamps based on typical song structures. 
                     For best results, ensure the lyrics are complete and in order.
                   </p>
@@ -761,7 +782,7 @@ export default function App() {
                 <button 
                   onClick={handleAiGenerate}
                   disabled={isGenerating || !rawLyricsInput.trim()}
-                  className="px-6 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-medium transition-all shadow-lg shadow-purple-600/20 flex items-center gap-2"
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-medium transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
                 >
                   {isGenerating ? (
                     <>
