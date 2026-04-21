@@ -9,18 +9,11 @@ import {
   Pause, 
   SkipBack, 
   SkipForward, 
-  Volume2, 
   Music, 
   Search, 
   FolderOpen,
   ListMusic,
-  Maximize2,
-  Minimize2,
-  Heart,
-  Sparkles,
   X,
-  Loader2,
-  Save,
   User,
   RotateCcw,
   Shuffle,
@@ -29,7 +22,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseLRC, LyricLine } from './lib/lyricParser';
-import { generateTimestampedLyrics } from './services/geminiService';
 
 interface Song {
   id: string;
@@ -49,20 +41,13 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.7);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isFullScreen, setIsFullScreen] = useState(false);
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [activeTab, setActiveTab] = useState<'player' | 'playlist'>('player');
   const [rootFolderName, setRootFolderName] = useState<string | null>(null);
   const [playbackMode, setPlaybackMode] = useState<'normal' | 'shuffle' | 'repeat'>('normal');
   const [showLyricsView, setShowLyricsView] = useState(false);
   
-  // AI Modal State
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [rawLyricsInput, setRawLyricsInput] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -198,31 +183,6 @@ export default function App() {
       name.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [searchQuery, folders]);
-
-  // AI Lyric Generation
-  const handleAiGenerate = async () => {
-    if (!currentSong || !rawLyricsInput.trim()) return;
-    
-    setIsGenerating(true);
-    try {
-      const lrcText = await generateTimestampedLyrics(currentSong.name, rawLyricsInput);
-      const parsedLyrics = parseLRC(lrcText);
-      
-      // Update current song lyrics
-      const updatedSongs = [...songs];
-      updatedSongs[currentSongIndex] = {
-        ...currentSong,
-        lyrics: parsedLyrics
-      };
-      setSongs(updatedSongs);
-      setIsAiModalOpen(false);
-      setRawLyricsInput('');
-    } catch (error) {
-      alert("Failed to generate lyrics. Please check your connection.");
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
   // Playback logic
   useEffect(() => {
@@ -411,13 +371,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4">
-          <button 
-            onClick={() => setIsAiModalOpen(true)}
-            className="p-2 md:p-2.5 bg-white/5 hover:bg-white/10 rounded-full transition-all group"
-            title="AI Lyric Sync"
-          >
-            <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-blue-400 group-hover:scale-110 transition-transform" />
-          </button>
           <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg">
             <User className="w-5 h-5 md:w-6 md:h-6 text-gray-400" />
           </div>
@@ -593,15 +546,6 @@ export default function App() {
                       ) : (
                         <div className="flex flex-col items-center justify-center h-full text-gray-500 italic gap-6 text-center">
                           <p className="text-xl">{currentSong ? 'No lyrics available for this song.' : 'Select a song to see lyrics.'}</p>
-                          {currentSong && (
-                            <button 
-                              onClick={() => setIsAiModalOpen(true)}
-                              className="flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl text-base font-semibold transition-all border border-white/10 group"
-                            >
-                              <Sparkles className="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
-                              Generate Lyrics with AI
-                            </button>
-                          )}
                         </div>
                       )}
                     </AnimatePresence>
@@ -714,93 +658,6 @@ export default function App() {
           </div>
         </div>
       </footer>
-
-      {/* AI Lyric Modal */}
-      <AnimatePresence>
-        {isAiModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsAiModalOpen(false)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-[#1a1a1a] border border-white/10 w-full max-w-2xl rounded-3xl overflow-hidden relative z-10 shadow-2xl"
-            >
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-gradient-to-r from-blue-600/10 to-cyan-600/10">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                    <Sparkles className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold">AI Lyric Sync</h3>
-                    <p className="text-xs text-gray-400">Add timestamps to raw lyrics using Gemini AI</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setIsAiModalOpen(false)}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              
-              <div className="p-6 space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-400">Raw Lyrics</label>
-                  <textarea 
-                    value={rawLyricsInput}
-                    onChange={(e) => setRawLyricsInput(e.target.value)}
-                    placeholder="Paste your raw lyrics here..."
-                    className="w-full h-64 bg-white/5 border border-white/10 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white/10 transition-all resize-none custom-scrollbar text-sm"
-                  />
-                </div>
-                
-                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex gap-3">
-                  <div className="p-2 bg-blue-500/20 rounded-lg h-fit">
-                    <Sparkles className="w-4 h-4 text-blue-400" />
-                  </div>
-                  <p className="text-xs text-blue-300 leading-relaxed">
-                    Gemini AI will estimate the timestamps based on typical song structures. 
-                    For best results, ensure the lyrics are complete and in order.
-                  </p>
-                </div>
-              </div>
-              
-              <div className="p-6 bg-white/5 flex justify-end gap-3">
-                <button 
-                  onClick={() => setIsAiModalOpen(false)}
-                  className="px-6 py-2 rounded-xl text-sm font-medium hover:bg-white/10 transition-all"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleAiGenerate}
-                  disabled={isGenerating || !rawLyricsInput.trim()}
-                  className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-medium transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
-                >
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Generating...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4" />
-                      Sync with AI
-                    </>
-                  )}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Hidden Audio Element */}
       <audio
