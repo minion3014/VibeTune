@@ -499,7 +499,7 @@ export default function App() {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 1.05 }}
                   transition={{ duration: 0.4 }}
-                  className="relative group max-w-sm md:max-w-md aspect-square w-full"
+                  className="relative group max-w-[260px] md:max-w-[360px] aspect-square w-full my-12"
                 >
                   <img 
                     src={currentSong?.cover || 'https://picsum.photos/seed/music/800/800'} 
