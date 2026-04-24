@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { useState, useRef, useEffect, useMemo, ChangeEvent } from 'react';
 import { 
   Play, 
@@ -35,7 +30,7 @@ interface Song {
 
 export default function App() {
   const [songs, setSongs] = useState<Song[]>([]);
-  const [allSongs, setAllSongs] = useState<Song[]>([]); // Store all songs for filtering
+  const [allSongs, setAllSongs] = useState<Song[]>([]); 
   const [folders, setFolders] = useState<Map<string, Song[]>>(new Map());
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
@@ -79,12 +74,11 @@ export default function App() {
     };
   }, []);
 
-  // Handle file selection from input
+  // Handle file selection
   const handleFiles = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    // Get root folder name from the first file's path
     const firstFilePath = files[0].webkitRelativePath || files[0].name;
     const rootName = firstFilePath.split('/')[0] || 'Selected Folder';
     setRootFolderName(rootName);
@@ -96,7 +90,6 @@ export default function App() {
       const file = files[i];
       const path = file.webkitRelativePath || file.name;
       const pathParts = path.split('/');
-      // Get the immediate parent folder name
       const folderName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : 'Root';
       
       const lastDotIndex = path.lastIndexOf('.');
@@ -130,7 +123,6 @@ export default function App() {
         let artist = files.folder;
         try {
           const metadata = await mm.parseBlob(files.audio);
-          // Prioritize composer (nhạc sĩ) then artist (ca sĩ) then folder name
           artist = metadata.common.composer || metadata.common.artist || files.folder;
         } catch (e) {
           console.warn(`Error parsing metadata for ${files.audio.name}:`, e);
@@ -186,10 +178,9 @@ export default function App() {
     setCurrentFolder(null);
   };
 
-  // Filtered suggestions for the search bar
   const folderSuggestions = useMemo(() => {
     if (!searchQuery) return [];
-    return Array.from(folders.keys()).filter((name: string) => 
+    return Array.from(folders.keys()).filter(name => 
       name.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [searchQuery, folders]);
@@ -231,9 +222,7 @@ export default function App() {
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       setCurrentTime(0);
-      if (!isPlaying) {
-        setIsPlaying(true);
-      }
+      if (!isPlaying) setIsPlaying(true);
     }
   };
 
@@ -263,19 +252,15 @@ export default function App() {
 
   const prevSong = () => {
     if (songs.length === 0) return;
-    
-    // If more than 3 seconds, just restart current song
     if (audioRef.current && audioRef.current.currentTime > 3) {
       audioRef.current.currentTime = 0;
       setCurrentTime(0);
       return;
     }
-
     setCurrentSongIndex((prev) => (prev - 1 + songs.length) % songs.length);
     setIsPlaying(true);
   };
 
-  // Find current lyric index based on current playback time
   const currentLyricIndex = useMemo(() => {
     if (!currentSong || currentSong.lyrics.length === 0) return -1;
     return currentSong.lyrics.findIndex((line, i) => {
@@ -293,9 +278,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden flex flex-col">
+    <div className="h-[100dvh] bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden flex flex-col">
       {/* Header */}
-      <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/20 backdrop-blur-md sticky top-0 z-[100]">
+      <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/20 backdrop-blur-md sticky top-0 z-[100] flex-shrink-0">
         <div className="flex items-center gap-2 md:gap-3">
           <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
             <Music className="w-5 h-5 md:w-6 md:h-6 text-white" />
@@ -316,7 +301,6 @@ export default function App() {
             className="bg-white/5 border border-white/10 rounded-full py-2 md:py-2.5 pl-10 pr-4 w-full focus:outline-none focus:ring-2 focus:ring-[#0070f3]/50 focus:bg-white/10 transition-all text-sm shadow-inner"
           />
           
-          {/* Search Suggestions Dropdown */}
           <AnimatePresence>
             {showSearchSuggestions && (
               <motion.div 
@@ -404,9 +388,8 @@ export default function App() {
           </button>
         </div>
 
-        {/* Sidebar / Playlist */}
         <div className={`${activeTab === 'playlist' ? 'flex' : 'hidden'} md:flex w-full md:w-80 border-r border-white/10 flex-col bg-black/20 backdrop-blur-sm overflow-hidden`}>
-          <div className="flex items-center justify-between px-2">
+          <div className="px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2 text-gray-400">
               <ListMusic className="w-4 h-4" />
               <span className="text-sm font-medium uppercase tracking-wider">
@@ -424,7 +407,7 @@ export default function App() {
           </div>
           
           {currentFolder && (
-            <div className="mx-2 p-3 bg-[#0070f3]/10 border border-[#0070f3]/20 rounded-xl flex items-center gap-3">
+            <div className="mx-2 p-3 bg-[#0070f3]/10 border border-[#0070f3]/20 rounded-xl flex items-center gap-3 mb-2">
               <FolderOpen className="w-4 h-4 text-blue-400" />
               <div className="flex-1 overflow-hidden">
                 <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
@@ -437,12 +420,12 @@ export default function App() {
           )}
           <div className="flex-1 overflow-y-auto pr-2 space-y-1 custom-scrollbar">
             {filteredSongs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl">
+              <div className="flex flex-col items-center justify-center h-40 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl mx-2">
                 <Music className="w-8 h-8 mb-2 opacity-20" />
-                <p className="text-sm">No songs found. Select a folder to get started.</p>
+                <p className="text-sm">No songs found.</p>
               </div>
             ) : (
-              filteredSongs.map((song, index) => (
+              filteredSongs.map((song) => (
                 <button
                   key={song.id}
                   onClick={() => {
@@ -478,14 +461,12 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center: Main Player / Lyrics */}
         <div className={`${activeTab === 'player' ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-[#110c1c] overflow-hidden relative`}>
           <div className="absolute inset-0 bg-gradient-to-br from-[#1a1427] to-[#0a0a0a] pointer-events-none" />
           
           <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 z-10 relative w-full h-full">
             <AnimatePresence mode="wait">
               {!showLyricsView ? (
-                // Album Art View
                 <motion.div 
                   key="album-art"
                   initial={{ opacity: 0, scale: 0.95 }}
@@ -500,8 +481,6 @@ export default function App() {
                     className="w-full h-full rounded-2xl object-cover shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative z-10"
                     referrerPolicy="no-referrer"
                   />
-                  
-                  {/* Visualizer Icon Overlay */}
                   {isPlaying && (
                     <div className="absolute bottom-6 left-6 z-20 flex items-end gap-1.5 px-4 py-3 bg-black/40 backdrop-blur-xl rounded-xl border border-white/10">
                       <motion.div animate={{ height: [6, 18, 6] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-1.5 bg-white rounded-full" />
@@ -511,7 +490,6 @@ export default function App() {
                   )}
                 </motion.div>
               ) : (
-                // Lyrics View
                 <motion.div 
                   key="lyrics-view"
                   initial={{ opacity: 0, scale: 1.05 }}
@@ -530,23 +508,20 @@ export default function App() {
                           exit={{ opacity: 0, y: -30 }}
                           className="flex flex-col items-center space-y-8 md:space-y-12 w-full"
                         >
-                          {/* Previous Line */}
                           {currentLyricIndex > 0 ? (
-                            <p className="text-xl md:text-3xl font-bold text-white/10 text-center line-clamp-1 max-w-[90%] blur-[1px]">
+                            <p className="text-xl md:text-2xl font-bold text-white/10 text-center line-clamp-1 max-w-[90%] blur-[1px]">
                               {currentSong.lyrics[currentLyricIndex - 1].text}
                             </p>
                           ) : (
                             <div className="h-10 md:h-12 invisible" />
                           )}
                           
-                          {/* Current Line */}
-                          <p className="text-2xl md:text-4xl lg:text-5xl font-black text-[#fbbf24] text-center drop-shadow-[0_0_30px_rgba(251,191,36,0.4)] leading-tight max-w-full px-4">
+                          <p className="text-2xl md:text-3xl lg:text-4xl font-black text-[#fbbf24] text-center drop-shadow-[0_0_30px_rgba(251,191,36,0.4)] leading-tight max-w-full px-4">
                             {currentSong.lyrics[currentLyricIndex === -1 ? 0 : currentLyricIndex].text}
                           </p>
 
-                          {/* Next Line */}
                           {currentLyricIndex < currentSong.lyrics.length - 1 ? (
-                            <p className="text-xl md:text-3xl font-bold text-white/20 text-center line-clamp-1 max-w-[90%] blur-[0.5px]">
+                            <p className="text-xl md:text-2xl font-bold text-white/20 text-center line-clamp-1 max-w-[90%] blur-[0.5px]">
                               {currentSong.lyrics[currentLyricIndex === -1 ? 1 : currentLyricIndex + 1].text}
                             </p>
                           ) : (
@@ -564,7 +539,6 @@ export default function App() {
               )}
             </AnimatePresence>
 
-            {/* Lyric Toggle Button - Bottom Right of Player Area */}
             <button 
               onClick={() => setShowLyricsView(!showLyricsView)}
               className={`absolute bottom-4 right-4 md:bottom-8 md:right-8 p-3 md:p-4 rounded-full transition-all z-30 shadow-2xl backdrop-blur-md group ${showLyricsView ? 'bg-[#0070f3] text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/10'}`}
@@ -576,11 +550,8 @@ export default function App() {
         </div>
       </main>
 
-      {/* Bottom Player Bar */}
-      <footer className="bg-[#0a0a0a]/90 backdrop-blur-2xl border-t border-white/5 z-20 px-6 py-6 h-auto">
+      <footer className="bg-[#0a0a0a]/95 backdrop-blur-2xl border-t border-white/5 z-50 px-4 md:px-6 py-4 md:py-6 h-auto flex-shrink-0 sticky bottom-0">
         <div className="max-w-3xl mx-auto flex flex-col items-center gap-4">
-          
-          {/* Song Title & Artist */}
           <div className="text-center">
             <AnimatePresence mode="wait">
               {currentSong && (
@@ -598,7 +569,6 @@ export default function App() {
             </AnimatePresence>
           </div>
 
-          {/* Progress Bar Container */}
           <div className="w-full flex items-center gap-4">
             <span className="text-[10px] md:text-xs font-medium text-blue-500/70 w-10 text-right">{formatTime(currentTime)}</span>
             <div className="flex-1 relative h-1.5 md:h-1 bg-white/10 rounded-full">
@@ -621,9 +591,7 @@ export default function App() {
             <span className="text-[10px] md:text-xs font-medium text-blue-500/70 w-10">{formatTime(duration)}</span>
           </div>
 
-          {/* Main Controls Overlay */}
           <div className="flex items-center gap-6 md:gap-10 mt-2">
-            {/* Combined Shuffle/Repeat Toggle */}
             <button 
               onClick={() => {
                 const modes: ('normal' | 'shuffle' | 'repeat')[] = ['normal', 'shuffle', 'repeat'];
@@ -633,11 +601,7 @@ export default function App() {
               className={`p-2 rounded-full transition-all flex items-center justify-center relative ${playbackMode !== 'normal' ? 'bg-[#0070f3]/20 text-[#0070f3]' : 'text-gray-500 hover:text-white'}`}
               title={playbackMode === 'shuffle' ? 'Shuffle' : playbackMode === 'repeat' ? 'Repeat' : 'Normal'}
             >
-              {playbackMode === 'repeat' ? (
-                <Repeat className="w-5 h-5 md:w-6 md:h-6" />
-              ) : (
-                <Shuffle className={`w-5 h-5 md:w-6 md:h-6 ${playbackMode === 'shuffle' ? 'opacity-100' : 'opacity-100'}`} />
-              )}
+              {playbackMode === 'repeat' ? <Repeat className="w-5 h-5 md:w-6 md:h-6" /> : <Shuffle className="w-5 h-5 md:w-6 md:h-6" />}
             </button>
 
             <button 
@@ -669,7 +633,6 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Hidden Audio Element */}
       <audio
         ref={audioRef}
         src={currentSong?.audioUrl}
@@ -678,25 +641,6 @@ export default function App() {
         onEnded={nextSong}
       />
 
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.2);
-        }
-        .mask-fade {
-          -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
-          mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
-        }
-      `}</style>
       <input
         type="file"
         ref={fileInputRef}

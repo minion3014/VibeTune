@@ -1,5 +1,5 @@
 {
-  "name": "VibeTune - Local Lyric Player",
-  "description": "A sleek music player that syncs lyrics from local files. Supports MP3 and TXT (LRC format) lyric files.",
+  "name": "VibeTune",
+  "description": "A modern music player with lyric sync and local folder support.",
   "requestFramePermissions": []
 }
