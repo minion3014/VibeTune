@@ -46,6 +46,7 @@ export default function App() {
   
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputFilesRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const currentSong = songs[currentSongIndex] || null;
@@ -79,8 +80,12 @@ export default function App() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const firstFilePath = files[0].webkitRelativePath || files[0].name;
-    const rootName = firstFilePath.split('/')[0] || 'Selected Folder';
+    // Use root name from the first file's path or fallback
+    const firstFileWithPath = Array.from(files).find(f => f.webkitRelativePath);
+    const rootName = firstFileWithPath 
+      ? firstFileWithPath.webkitRelativePath.split('/')[0] 
+      : 'Imported Files';
+    
     setRootFolderName(rootName);
 
     const songMap = new Map<string, { audio?: File; lrc?: File; folder: string }>();
@@ -88,61 +93,71 @@ export default function App() {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      // On mobile/Android, webkitRelativePath is often empty
       const path = file.webkitRelativePath || file.name;
       const pathParts = path.split('/');
-      const folderName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : 'Root';
       
-      const lastDotIndex = path.lastIndexOf('.');
+      let folderName = rootName;
+      if (file.webkitRelativePath) {
+        folderName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : 'Root';
+      }
+      
+      const lastDotIndex = file.name.lastIndexOf('.');
       if (lastDotIndex === -1) continue;
       
-      const nameWithoutExt = path.substring(0, lastDotIndex).toLowerCase();
-      const ext = path.substring(lastDotIndex + 1).toLowerCase();
+      const fileNameNoExt = file.name.substring(0, lastDotIndex).toLowerCase();
+      const ext = file.name.substring(lastDotIndex + 1).toLowerCase();
 
       if (['mp3', 'wav', 'm4a', 'flac', 'ogg'].includes(ext)) {
-        const current = songMap.get(nameWithoutExt) || { folder: folderName };
-        songMap.set(nameWithoutExt, { ...current, audio: file });
-      } else if (ext === 'txt') {
-        const current = songMap.get(nameWithoutExt) || { folder: folderName };
-        songMap.set(nameWithoutExt, { ...current, lrc: file });
+        const current = songMap.get(fileNameNoExt) || { folder: folderName };
+        songMap.set(fileNameNoExt, { ...current, audio: file });
+      } else if (ext === 'txt' || ext === 'lrc') {
+        const current = songMap.get(fileNameNoExt) || { folder: folderName };
+        songMap.set(fileNameNoExt, { ...current, lrc: file });
       }
     }
 
     const allLoadedSongs: Song[] = [];
-    for (const files of songMap.values()) {
-      if (files.audio) {
+    for (const [name, data] of songMap.entries()) {
+      if (data.audio) {
         let lyrics: LyricLine[] = [];
-        if (files.lrc) {
+        if (data.lrc) {
           try {
-            const lrcText = await files.lrc.text();
+            const lrcText = await data.lrc.text();
             lyrics = parseLRC(lrcText);
           } catch (e) {
-            console.error(`Error parsing lyrics for ${files.audio.name}:`, e);
+            console.error(`Error parsing lyrics for ${data.audio.name}:`, e);
           }
         }
 
-        let artist = files.folder;
+        let artist = data.folder;
         try {
-          const metadata = await mm.parseBlob(files.audio);
-          artist = metadata.common.composer || metadata.common.artist || files.folder;
+          const metadata = await mm.parseBlob(data.audio);
+          artist = metadata.common.composer || metadata.common.artist || data.folder;
         } catch (e) {
-          console.warn(`Error parsing metadata for ${files.audio.name}:`, e);
+          console.warn(`Error parsing metadata for ${data.audio.name}:`, e);
         }
 
-        const fileName = files.audio.name.substring(0, files.audio.name.lastIndexOf('.'));
+        const songName = data.audio.name.substring(0, data.audio.name.lastIndexOf('.'));
         const song: Song = {
           id: Math.random().toString(36).substr(2, 9),
-          name: fileName,
+          name: songName,
           artist,
-          audioUrl: URL.createObjectURL(files.audio),
+          audioUrl: URL.createObjectURL(data.audio),
           lyrics,
-          cover: `https://picsum.photos/seed/${fileName}/400/400`,
+          cover: `https://picsum.photos/seed/${data.audio.name}/400/400`,
         };
 
         allLoadedSongs.push(song);
         
-        const folderSongs = folderMap.get(files.folder) || [];
-        folderMap.set(files.folder, [...folderSongs, song]);
+        const folderSongs = folderMap.get(data.folder) || [];
+        folderMap.set(data.folder, [...folderSongs, song]);
       }
+    }
+
+    if (allLoadedSongs.length === 0) {
+      alert("Không tìm thấy file nhạc hợp lệ. Vui lòng chọn đồng thời cả file nhạc và file .txt tương ứng.");
+      return;
     }
 
     setAllSongs(allLoadedSongs);
@@ -156,11 +171,16 @@ export default function App() {
     }
     
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (fileInputFilesRef.current) fileInputFilesRef.current.value = '';
     setShowSearchSuggestions(false);
   };
 
-  const triggerFileSelect = () => {
-    fileInputRef.current?.click();
+  const triggerFileSelect = (mode: 'folder' | 'files' = 'folder') => {
+    if (mode === 'folder') {
+      fileInputRef.current?.click();
+    } else {
+      fileInputFilesRef.current?.click();
+    }
   };
 
   const selectFolder = (folderName: string) => {
@@ -277,6 +297,61 @@ export default function App() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const renderSongList = () => {
+    if (filteredSongs.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl mx-2">
+          <Music className="w-10 h-10 mb-4 opacity-10" />
+          <p className="text-sm font-medium">No tracks found</p>
+          <button 
+            onClick={() => triggerFileSelect('folder')}
+            className="mt-4 text-xs font-bold text-blue-400 hover:underline"
+          >
+            Import media
+          </button>
+        </div>
+      );
+    }
+
+    return filteredSongs.map((song) => (
+      <button
+        key={song.id}
+        onClick={() => {
+          setCurrentSongIndex(songs.indexOf(song));
+          setIsPlaying(true);
+          if (window.innerWidth < 768) setIsLibraryOpen(false);
+        }}
+        className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group border border-transparent ${
+          currentSong?.id === song.id 
+            ? 'bg-blue-500/10 text-white border-blue-500/30' 
+            : 'hover:bg-white/5 text-gray-400 hover:text-white'
+        }`}
+      >
+        <div className="relative flex-shrink-0">
+          <img 
+            src={song.cover} 
+            alt={song.name} 
+            className={`w-12 h-12 rounded-lg object-cover shadow-lg transition-transform ${currentSong?.id === song.id ? 'scale-90' : 'group-hover:scale-105'}`}
+            referrerPolicy="no-referrer"
+          />
+          {currentSong?.id === song.id && isPlaying && (
+            <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
+              <div className="flex gap-0.5 items-end h-3">
+                <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-0.5 bg-white" />
+                <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-0.5 bg-white" />
+                <motion.div animate={{ height: [4, 10, 4] }} transition={{ repeat: Infinity, duration: 0.7 }} className="w-0.5 bg-white" />
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex-1 text-left overflow-hidden">
+          <p className={`font-bold truncate text-sm ${currentSong?.id === song.id ? 'text-blue-400' : 'text-gray-200'}`}>{song.name}</p>
+          <p className="text-[11px] opacity-50 truncate font-medium">{song.artist}</p>
+        </div>
+      </button>
+    ));
+  };
+
   return (
     <div className="h-[100dvh] bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden flex flex-col">
       {/* Header */}
@@ -307,13 +382,13 @@ export default function App() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
-                className="absolute top-full left-0 right-0 mt-2 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[110]"
+                className="fixed md:absolute top-16 md:top-full left-0 right-0 md:mt-2 bg-[#1a1a1a] md:rounded-2xl border-b md:border border-white/10 shadow-2xl overflow-hidden z-[200] max-h-[80vh] md:max-h-[400px]"
               >
-                  <div className="p-2">
+                  <div className="p-4 md:p-2">
                     {allSongs.length === 0 ? (
-                      <div className="p-1">
+                      <div className="p-1 space-y-2">
                         <button 
-                          onClick={triggerFileSelect}
+                          onClick={() => triggerFileSelect('folder')}
                           className="w-full flex items-center gap-4 p-4 hover:bg-blue-600/20 text-white rounded-xl transition-all text-left group"
                         >
                           <div className="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center group-hover:bg-blue-600 transition-colors">
@@ -321,24 +396,40 @@ export default function App() {
                           </div>
                           <div className="flex-1">
                             <p className="font-bold text-sm">Open Local Folder</p>
-                            <p className="text-[10px] text-gray-500">{rootFolderName ? `Current: ${rootFolderName}` : 'Select a folder to start'}</p>
+                            <p className="text-[10px] text-gray-500">Select a folder (Best for Desktop)</p>
+                          </div>
+                        </button>
+
+                        <button 
+                          onClick={() => triggerFileSelect('files')}
+                          className="w-full flex items-center gap-4 p-4 hover:bg-green-600/20 text-white rounded-xl transition-all text-left group"
+                        >
+                          <div className="w-10 h-10 bg-green-600/20 rounded-lg flex items-center justify-center group-hover:bg-green-600 transition-colors">
+                            <ListMusic className="w-5 h-5 text-green-400 group-hover:text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-bold text-sm">Select Multiple Files</p>
+                            <p className="text-[10px] text-gray-500">Select files manually (Best for Android)</p>
                           </div>
                         </button>
                       </div>
                     ) : (
                       <>
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest flex justify-between items-center">
-                          <span>Folders Found</span>
-                          <button onClick={triggerFileSelect} className="text-blue-400 hover:underline text-[9px]">Change Root</button>
+                          <span>Categories / Folders</span>
+                          <div className="flex gap-4">
+                            <button onClick={() => triggerFileSelect('folder')} className="text-blue-400 hover:underline text-[9px]">Add Folder</button>
+                            <button onClick={() => triggerFileSelect('files')} className="text-green-400 hover:underline text-[9px]">Add Files</button>
+                          </div>
                         </div>
                         
                         {folderSuggestions.length > 0 ? (
-                          <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                          <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
                             {folderSuggestions.map(name => (
                               <button 
                                 key={name}
                                 onClick={() => selectFolder(name)}
-                                className="w-full flex items-center gap-3 p-3 hover:bg-blue-600/20 text-white rounded-xl transition-all text-sm text-left group"
+                                className="w-full flex items-center gap-3 p-4 md:p-3 hover:bg-blue-600/20 text-white rounded-xl transition-all text-sm text-left group"
                               >
                                 <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
                                   <FolderOpen className="w-5 h-5 text-gray-400 group-hover:text-blue-400" />
@@ -351,8 +442,8 @@ export default function App() {
                             ))}
                           </div>
                         ) : (
-                          <div className="p-8 text-center text-gray-500">
-                            <Search className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                          <div className="p-12 text-center text-gray-500">
+                            <Search className="w-10 h-10 mx-auto mb-4 opacity-20" />
                             <p className="text-sm">No folders matching "{searchQuery}"</p>
                           </div>
                         )}
@@ -380,106 +471,103 @@ export default function App() {
       </header>
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        {/* Desktop Sidebar Library (Web Mode) */}
+        <AnimatePresence mode="popLayout">
+          {isLibraryOpen && (
+            <motion.aside
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 320, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="hidden md:flex flex-col border-r border-white/10 bg-black/20 backdrop-blur-md overflow-hidden h-full"
+            >
+              <div className="p-6 border-b border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <ListMusic className="w-5 h-5 text-blue-400" />
+                  <span className="font-black tracking-tight text-lg uppercase">Library</span>
+                </div>
+                <button 
+                  onClick={() => setIsLibraryOpen(false)}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-hidden flex flex-col p-2 pt-4">
+                {currentFolder && (
+                  <div className="mx-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center gap-3 mb-4">
+                    <FolderOpen className="w-4 h-4 text-blue-400" />
+                    <div className="flex-1 overflow-hidden">
+                      <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
+                      <p className="text-[10px] text-blue-400/60">{songs.length} tracks</p>
+                    </div>
+                    <button onClick={resetFilter} className="text-blue-400 hover:text-white">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar">
+                  {renderSongList()}
+                </div>
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+
+        {/* Mobile Drawer Library (Mobile Mode) */}
         <AnimatePresence>
           {isLibraryOpen && (
             <>
-              {/* Dark Overlay */}
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 onClick={() => setIsLibraryOpen(false)}
-                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150]"
+                className="md:hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-[150]"
               />
               
-              {/* Sliding Drawer */}
               <motion.div 
-                initial={{ x: '-100%' }}
-                animate={{ x: 0 }}
-                exit={{ x: '-100%' }}
+                initial={{ y: '100%' }}
+                animate={{ y: 0 }}
+                exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="fixed top-0 left-0 bottom-0 w-full max-w-sm bg-[#161616] border-r border-white/10 z-[160] flex flex-col shadow-2xl"
+                className="md:hidden fixed bottom-0 left-0 right-0 h-[80vh] bg-[#161616] border-t border-white/10 z-[160] flex flex-col rounded-t-[32px] shadow-2xl overflow-hidden"
               >
-                <div className="px-6 py-6 border-b border-white/5 flex items-center justify-between bg-black/20">
-                  <div className="flex items-center gap-3 text-gray-200">
+                <div className="flex justify-center pt-3 pb-1">
+                  <div className="w-12 h-1.5 bg-white/10 rounded-full" />
+                </div>
+
+                <div className="px-6 py-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
                     <ListMusic className="w-5 h-5 text-blue-400" />
-                    <span className="font-black tracking-tight text-lg uppercase">Your Library</span>
+                    <span className="font-bold text-lg">Your Library</span>
                   </div>
                   <button 
                     onClick={() => setIsLibraryOpen(false)}
-                    className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                    className="p-2 bg-white/5 rounded-full"
                   >
-                    <X className="w-6 h-6" />
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-hidden flex flex-col p-2">
-                  <div className="mb-4">
-                    {currentFolder && (
-                      <div className="mx-2 p-3 bg-[#0070f3]/10 border border-[#0070f3]/20 rounded-xl flex items-center gap-3">
-                        <FolderOpen className="w-4 h-4 text-blue-400" />
-                        <div className="flex-1 overflow-hidden">
-                          <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
-                          <p className="text-[10px] text-blue-400/60">{songs.length} songs</p>
-                        </div>
-                        <button onClick={resetFilter} className="text-blue-400 hover:text-white">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                <div className="flex-1 overflow-hidden flex flex-col p-4">
+                  {currentFolder && (
+                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center gap-3 mb-6">
+                      <FolderOpen className="w-5 h-5 text-blue-400" />
+                      <div className="flex-1 overflow-hidden">
+                        <p className="text-sm font-bold text-blue-400 truncate">{currentFolder}</p>
+                        <p className="text-xs text-blue-400/60">{songs.length} items</p>
                       </div>
-                    )}
-                  </div>
+                      <button onClick={resetFilter} className="p-1">
+                        <X className="w-5 h-5 text-blue-400" />
+                      </button>
+                    </div>
+                  )}
 
-                  <div className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar pb-8">
-                    {filteredSongs.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl mx-2">
-                        <Music className="w-10 h-10 mb-4 opacity-10" />
-                        <p className="text-sm font-medium">No tracks found in library</p>
-                        <button 
-                          onClick={triggerFileSelect}
-                          className="mt-4 text-xs font-bold text-blue-400 hover:underline"
-                        >
-                          Import media
-                        </button>
-                      </div>
-                    ) : (
-                      filteredSongs.map((song) => (
-                        <button
-                          key={song.id}
-                          onClick={() => {
-                            setCurrentSongIndex(songs.indexOf(song));
-                            setIsPlaying(true);
-                            if (window.innerWidth < 768) setIsLibraryOpen(false);
-                          }}
-                          className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group border border-transparent ${
-                            currentSong?.id === song.id 
-                              ? 'bg-[#0070f3]/10 text-white border-blue-500/30' 
-                              : 'hover:bg-white/5 text-gray-400 hover:text-white'
-                          }`}
-                        >
-                          <div className="relative flex-shrink-0">
-                            <img 
-                              src={song.cover} 
-                              alt={song.name} 
-                              className={`w-12 h-12 rounded-lg object-cover shadow-lg transition-transform ${currentSong?.id === song.id ? 'scale-90' : 'group-hover:scale-105'}`}
-                              referrerPolicy="no-referrer"
-                            />
-                            {currentSong?.id === song.id && isPlaying && (
-                              <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
-                                <div className="flex gap-0.5 items-end h-3">
-                                  <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-0.5 bg-white" />
-                                  <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-0.5 bg-white" />
-                                  <motion.div animate={{ height: [4, 10, 4] }} transition={{ repeat: Infinity, duration: 0.7 }} className="w-0.5 bg-white" />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex-1 text-left overflow-hidden">
-                            <p className={`font-bold truncate text-sm ${currentSong?.id === song.id ? 'text-blue-400' : 'text-gray-200'}`}>{song.name}</p>
-                            <p className="text-[11px] opacity-50 truncate font-medium">{song.artist}</p>
-                          </div>
-                        </button>
-                      ))
-                    )}
+                  <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pb-12">
+                    {renderSongList()}
                   </div>
                 </div>
               </motion.div>
@@ -675,6 +763,14 @@ export default function App() {
         // @ts-ignore
         webkitdirectory=""
         directory=""
+        multiple
+      />
+
+      <input
+        type="file"
+        ref={fileInputFilesRef}
+        onChange={handleFiles}
+        className="hidden"
         multiple
       />
     </div>
