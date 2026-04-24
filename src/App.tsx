@@ -303,12 +303,26 @@ export default function App() {
         <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl mx-2">
           <Music className="w-10 h-10 mb-4 opacity-10" />
           <p className="text-sm font-medium">No tracks found</p>
-          <button 
-            onClick={() => triggerFileSelect('folder')}
-            className="mt-4 text-xs font-bold text-blue-400 hover:underline"
-          >
-            Import media
-          </button>
+          
+          <div className="mt-4 space-y-2 flex flex-col items-center">
+            <button 
+              onClick={() => triggerFileSelect('folder')}
+              className="hidden md:block text-xs font-bold text-blue-400 hover:underline px-4 py-2 bg-blue-500/10 rounded-lg"
+            >
+              Select Local Folder
+            </button>
+            <button 
+              onClick={() => triggerFileSelect('files')}
+              className="md:hidden text-xs font-bold text-green-400 hover:underline px-4 py-2 bg-green-500/10 rounded-lg"
+            >
+              Select Multiple Files
+            </button>
+            <p className="text-[9px] opacity-40 max-w-[150px]">
+              {window.innerWidth < 768 
+                ? "On Android, please select multiple files simultaneously." 
+                : "Select a folder containing your music and .txt lyrics."}
+            </p>
+          </div>
         </div>
       );
     }
@@ -386,41 +400,15 @@ export default function App() {
               >
                   <div className="p-4 md:p-2">
                     {allSongs.length === 0 ? (
-                      <div className="p-1 space-y-2">
-                        <button 
-                          onClick={() => triggerFileSelect('folder')}
-                          className="w-full flex items-center gap-4 p-4 hover:bg-blue-600/20 text-white rounded-xl transition-all text-left group"
-                        >
-                          <div className="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center group-hover:bg-blue-600 transition-colors">
-                            <FolderOpen className="w-5 h-5 text-blue-400 group-hover:text-white" />
-                          </div>
-                          <div className="flex-1">
-                            <p className="font-bold text-sm">Open Local Folder</p>
-                            <p className="text-[10px] text-gray-500">Select a folder (Best for Desktop)</p>
-                          </div>
-                        </button>
-
-                        <button 
-                          onClick={() => triggerFileSelect('files')}
-                          className="w-full flex items-center gap-4 p-4 hover:bg-green-600/20 text-white rounded-xl transition-all text-left group"
-                        >
-                          <div className="w-10 h-10 bg-green-600/20 rounded-lg flex items-center justify-center group-hover:bg-green-600 transition-colors">
-                            <ListMusic className="w-5 h-5 text-green-400 group-hover:text-white" />
-                          </div>
-                          <div className="flex-1">
-                            <p className="font-bold text-sm">Select Multiple Files</p>
-                            <p className="text-[10px] text-gray-500">Select files manually (Best for Android)</p>
-                          </div>
-                        </button>
+                      <div className="p-8 text-center text-gray-500">
+                        <Music className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                        <p className="text-sm">No music imported yet.</p>
+                        <p className="text-[10px] mt-1 opacity-60 text-blue-400">Open Library to add music</p>
                       </div>
                     ) : (
                       <>
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest flex justify-between items-center">
                           <span>Categories / Folders</span>
-                          <div className="flex gap-4">
-                            <button onClick={() => triggerFileSelect('folder')} className="text-blue-400 hover:underline text-[9px]">Add Folder</button>
-                            <button onClick={() => triggerFileSelect('files')} className="text-green-400 hover:underline text-[9px]">Add Files</button>
-                          </div>
                         </div>
                         
                         {folderSuggestions.length > 0 ? (
@@ -486,12 +474,21 @@ export default function App() {
                   <ListMusic className="w-5 h-5 text-blue-400" />
                   <span className="font-black tracking-tight text-lg uppercase">Library</span>
                 </div>
-                <button 
-                  onClick={() => setIsLibraryOpen(false)}
-                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => triggerFileSelect('folder')}
+                    className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors text-blue-400"
+                    title="Add Folder"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => setIsLibraryOpen(false)}
+                    className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <div className="flex-1 overflow-hidden flex flex-col p-2 pt-4">
@@ -544,12 +541,20 @@ export default function App() {
                     <ListMusic className="w-5 h-5 text-blue-400" />
                     <span className="font-bold text-lg">Your Library</span>
                   </div>
-                  <button 
-                    onClick={() => setIsLibraryOpen(false)}
-                    className="p-2 bg-white/5 rounded-full"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => triggerFileSelect('files')}
+                      className="p-2 bg-green-500/10 rounded-full text-green-400"
+                    >
+                      <ListMusic className="w-5 h-5" />
+                    </button>
+                    <button 
+                      onClick={() => setIsLibraryOpen(false)}
+                      className="p-2 bg-white/5 rounded-full"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-hidden flex flex-col p-4">
