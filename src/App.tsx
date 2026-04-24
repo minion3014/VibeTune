@@ -39,7 +39,7 @@ export default function App() {
   const [duration, setDuration] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
-  const [activeTab, setActiveTab] = useState<'player' | 'playlist'>('player');
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [rootFolderName, setRootFolderName] = useState<string | null>(null);
   const [playbackMode, setPlaybackMode] = useState<'normal' | 'shuffle' | 'repeat'>('normal');
   const [showLyricsView, setShowLyricsView] = useState(false);
@@ -365,6 +365,14 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4">
+          <button 
+            onClick={() => setIsLibraryOpen(true)}
+            className="p-2 md:p-2.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all group flex items-center gap-2 border border-white/5"
+            title="Open Library"
+          >
+            <ListMusic className="w-5 h-5 text-gray-400 group-hover:text-blue-400" />
+            <span className="text-xs font-bold hidden sm:block">Library</span>
+          </button>
           <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg">
             <User className="w-5 h-5 md:w-6 md:h-6 text-gray-400" />
           </div>
@@ -372,96 +380,114 @@ export default function App() {
       </header>
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-        {/* Mobile Tab Switcher */}
-        <div className="flex md:hidden border-b border-white/10 bg-black/40 backdrop-blur-md">
-          <button 
-            onClick={() => setActiveTab('player')}
-            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'player' ? 'text-[#0070f3] border-b-2 border-[#0070f3] bg-[#0070f3]/5' : 'text-gray-500'}`}
-          >
-            Now Playing
-          </button>
-          <button 
-            onClick={() => setActiveTab('playlist')}
-            className={`flex-1 py-3 text-sm font-bold transition-all ${activeTab === 'playlist' ? 'text-[#0070f3] border-b-2 border-[#0070f3] bg-[#0070f3]/5' : 'text-gray-500'}`}
-          >
-            Playlist ({songs.length})
-          </button>
-        </div>
-
-        <div className={`${activeTab === 'playlist' ? 'flex' : 'hidden'} md:flex w-full md:w-80 border-r border-white/10 flex-col bg-black/20 backdrop-blur-sm overflow-hidden`}>
-          <div className="px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-gray-400">
-              <ListMusic className="w-4 h-4" />
-              <span className="text-sm font-medium uppercase tracking-wider">
-                {currentFolder ? 'Folder View' : 'Your Library'}
-              </span>
-            </div>
-            {currentFolder && (
-              <button 
-                onClick={resetFilter}
-                className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-1 rounded transition-colors"
+        <AnimatePresence>
+          {isLibraryOpen && (
+            <>
+              {/* Dark Overlay */}
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsLibraryOpen(false)}
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150]"
+              />
+              
+              {/* Sliding Drawer */}
+              <motion.div 
+                initial={{ x: '-100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '-100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="fixed top-0 left-0 bottom-0 w-full max-w-sm bg-[#161616] border-r border-white/10 z-[160] flex flex-col shadow-2xl"
               >
-                Show All
-              </button>
-            )}
-          </div>
-          
-          {currentFolder && (
-            <div className="mx-2 p-3 bg-[#0070f3]/10 border border-[#0070f3]/20 rounded-xl flex items-center gap-3 mb-2">
-              <FolderOpen className="w-4 h-4 text-blue-400" />
-              <div className="flex-1 overflow-hidden">
-                <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
-                <p className="text-[10px] text-blue-400/60">{songs.length} songs</p>
-              </div>
-              <button onClick={resetFilter} className="text-blue-400 hover:text-white">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-          <div className="flex-1 overflow-y-auto pr-2 space-y-1 custom-scrollbar">
-            {filteredSongs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl mx-2">
-                <Music className="w-8 h-8 mb-2 opacity-20" />
-                <p className="text-sm">No songs found.</p>
-              </div>
-            ) : (
-              filteredSongs.map((song) => (
-                <button
-                  key={song.id}
-                  onClick={() => {
-                    setCurrentSongIndex(songs.indexOf(song));
-                    setIsPlaying(true);
-                  }}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group ${
-                    currentSong?.id === song.id 
-                      ? 'bg-[#0070f3]/20 text-[#0070f3] border border-[#0070f3]/20' 
-                      : 'hover:bg-white/5 text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <img 
-                    src={song.cover} 
-                    alt={song.name} 
-                    className="w-12 h-12 rounded-lg object-cover shadow-md"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="flex-1 text-left overflow-hidden">
-                    <p className="font-medium truncate text-sm">{song.name}</p>
-                    <p className="text-xs opacity-60 truncate">{song.artist}</p>
+                <div className="px-6 py-6 border-b border-white/5 flex items-center justify-between bg-black/20">
+                  <div className="flex items-center gap-3 text-gray-200">
+                    <ListMusic className="w-5 h-5 text-blue-400" />
+                    <span className="font-black tracking-tight text-lg uppercase">Your Library</span>
                   </div>
-                  {currentSong?.id === song.id && isPlaying && (
-                    <div className="flex gap-0.5 items-end h-3">
-                      <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-0.5 bg-[#0070f3]" />
-                      <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-0.5 bg-[#0070f3]" />
-                      <motion.div animate={{ height: [4, 10, 4] }} transition={{ repeat: Infinity, duration: 0.7 }} className="w-0.5 bg-[#0070f3]" />
-                    </div>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
+                  <button 
+                    onClick={() => setIsLibraryOpen(false)}
+                    className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
 
-        <div className={`${activeTab === 'player' ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-[#110c1c] overflow-hidden relative`}>
+                <div className="flex-1 overflow-hidden flex flex-col p-2">
+                  <div className="mb-4">
+                    {currentFolder && (
+                      <div className="mx-2 p-3 bg-[#0070f3]/10 border border-[#0070f3]/20 rounded-xl flex items-center gap-3">
+                        <FolderOpen className="w-4 h-4 text-blue-400" />
+                        <div className="flex-1 overflow-hidden">
+                          <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
+                          <p className="text-[10px] text-blue-400/60">{songs.length} songs</p>
+                        </div>
+                        <button onClick={resetFilter} className="text-blue-400 hover:text-white">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar pb-8">
+                    {filteredSongs.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl mx-2">
+                        <Music className="w-10 h-10 mb-4 opacity-10" />
+                        <p className="text-sm font-medium">No tracks found in library</p>
+                        <button 
+                          onClick={triggerFileSelect}
+                          className="mt-4 text-xs font-bold text-blue-400 hover:underline"
+                        >
+                          Import media
+                        </button>
+                      </div>
+                    ) : (
+                      filteredSongs.map((song) => (
+                        <button
+                          key={song.id}
+                          onClick={() => {
+                            setCurrentSongIndex(songs.indexOf(song));
+                            setIsPlaying(true);
+                            if (window.innerWidth < 768) setIsLibraryOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group border border-transparent ${
+                            currentSong?.id === song.id 
+                              ? 'bg-[#0070f3]/10 text-white border-blue-500/30' 
+                              : 'hover:bg-white/5 text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="relative flex-shrink-0">
+                            <img 
+                              src={song.cover} 
+                              alt={song.name} 
+                              className={`w-12 h-12 rounded-lg object-cover shadow-lg transition-transform ${currentSong?.id === song.id ? 'scale-90' : 'group-hover:scale-105'}`}
+                              referrerPolicy="no-referrer"
+                            />
+                            {currentSong?.id === song.id && isPlaying && (
+                              <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
+                                <div className="flex gap-0.5 items-end h-3">
+                                  <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.6 }} className="w-0.5 bg-white" />
+                                  <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-0.5 bg-white" />
+                                  <motion.div animate={{ height: [4, 10, 4] }} transition={{ repeat: Infinity, duration: 0.7 }} className="w-0.5 bg-white" />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1 text-left overflow-hidden">
+                            <p className={`font-bold truncate text-sm ${currentSong?.id === song.id ? 'text-blue-400' : 'text-gray-200'}`}>{song.name}</p>
+                            <p className="text-[11px] opacity-50 truncate font-medium">{song.artist}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
+        <div className="flex-1 flex flex-col bg-[#110c1c] overflow-hidden relative">
           <div className="absolute inset-0 bg-gradient-to-br from-[#1a1427] to-[#0a0a0a] pointer-events-none" />
           
           <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 z-10 relative w-full h-full">
