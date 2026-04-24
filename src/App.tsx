@@ -46,7 +46,6 @@ export default function App() {
   
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const fileInputFilesRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const currentSong = songs[currentSongIndex] || null;
@@ -171,16 +170,11 @@ export default function App() {
     }
     
     if (fileInputRef.current) fileInputRef.current.value = '';
-    if (fileInputFilesRef.current) fileInputFilesRef.current.value = '';
     setShowSearchSuggestions(false);
   };
 
-  const triggerFileSelect = (mode: 'folder' | 'files' = 'folder') => {
-    if (mode === 'folder') {
-      fileInputRef.current?.click();
-    } else {
-      fileInputFilesRef.current?.click();
-    }
+  const triggerFileSelect = () => {
+    fileInputRef.current?.click();
   };
 
   const selectFolder = (folderName: string) => {
@@ -252,7 +246,7 @@ export default function App() {
     if (playbackMode === 'repeat') {
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(e => console.error("Playback failed", e));
+        audioRef.current.play().catch(console.error);
       }
       setIsPlaying(true);
       return;
@@ -306,21 +300,13 @@ export default function App() {
           
           <div className="mt-4 space-y-2 flex flex-col items-center">
             <button 
-              onClick={() => triggerFileSelect('folder')}
-              className="hidden md:block text-xs font-bold text-blue-400 hover:underline px-4 py-2 bg-blue-500/10 rounded-lg"
+              onClick={() => triggerFileSelect()}
+              className="text-xs font-bold text-blue-400 hover:underline px-6 py-2.5 bg-blue-500/10 rounded-xl transition-all hover:bg-blue-500/20"
             >
-              Select Local Folder
+              Open Music Folder
             </button>
-            <button 
-              onClick={() => triggerFileSelect('files')}
-              className="md:hidden text-xs font-bold text-green-400 hover:underline px-4 py-2 bg-green-500/10 rounded-lg"
-            >
-              Select Multiple Files
-            </button>
-            <p className="text-[9px] opacity-40 max-w-[150px]">
-              {window.innerWidth < 768 
-                ? "On Android, please select multiple files simultaneously." 
-                : "Select a folder containing your music and .txt lyrics."}
+            <p className="text-[9px] opacity-40 max-w-[180px]">
+              Select a folder containing your music and .txt lyrics.
             </p>
           </div>
         </div>
@@ -445,11 +431,11 @@ export default function App() {
 
         <div className="flex items-center gap-2 md:gap-4">
           <button 
-            onClick={() => setIsLibraryOpen(true)}
-            className="p-2 md:p-2.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all group flex items-center gap-2 border border-white/5"
-            title="Open Library"
+            onClick={() => setIsLibraryOpen(!isLibraryOpen)}
+            className={`p-2 md:p-2.5 rounded-xl transition-all group flex items-center gap-2 border ${isLibraryOpen ? 'bg-blue-600/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/5 text-gray-400 hover:bg-white/10'}`}
+            title={isLibraryOpen ? "Close Library" : "Open Library"}
           >
-            <ListMusic className="w-5 h-5 text-gray-400 group-hover:text-blue-400" />
+            <ListMusic className="w-5 h-5 group-hover:text-blue-400" />
             <span className="text-xs font-bold hidden sm:block">Library</span>
           </button>
           <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg">
@@ -460,13 +446,19 @@ export default function App() {
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Desktop Sidebar Library (Web Mode) */}
-        <AnimatePresence mode="popLayout">
+        <AnimatePresence mode="wait">
           {isLibraryOpen && (
             <motion.aside
+              key="desktop-library"
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 320, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              transition={{ 
+                type: 'spring', 
+                damping: 30, 
+                stiffness: 150,
+                opacity: { duration: 0.2 }
+              }}
               className="hidden md:flex flex-col border-r border-white/10 bg-black/20 backdrop-blur-md overflow-hidden h-full"
             >
               <div className="p-6 border-b border-white/5 flex items-center justify-between">
@@ -476,9 +468,9 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button 
-                    onClick={() => triggerFileSelect('folder')}
+                    onClick={() => triggerFileSelect()}
                     className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors text-blue-400"
-                    title="Add Folder"
+                    title="Open Folder"
                   >
                     <FolderOpen className="w-4 h-4" />
                   </button>
@@ -526,10 +518,16 @@ export default function App() {
               />
               
               <motion.div 
+                key="mobile-library"
                 initial={{ y: '100%' }}
                 animate={{ y: 0 }}
-                exit={{ y: '100%' }}
-                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                exit={{ y: '100%', opacity: 0 }}
+                transition={{ 
+                  type: 'spring', 
+                  damping: 32, 
+                  stiffness: 180,
+                  opacity: { duration: 0.15 } 
+                }}
                 className="md:hidden fixed bottom-0 left-0 right-0 h-[80vh] bg-[#161616] border-t border-white/10 z-[160] flex flex-col rounded-t-[32px] shadow-2xl overflow-hidden"
               >
                 <div className="flex justify-center pt-3 pb-1">
@@ -543,10 +541,11 @@ export default function App() {
                   </div>
                   <div className="flex items-center gap-2">
                     <button 
-                      onClick={() => triggerFileSelect('files')}
-                      className="p-2 bg-green-500/10 rounded-full text-green-400"
+                      onClick={() => triggerFileSelect()}
+                      className="p-2 bg-blue-500/10 rounded-full text-blue-400"
+                      title="Open Folder"
                     >
-                      <ListMusic className="w-5 h-5" />
+                      <FolderOpen className="w-5 h-5" />
                     </button>
                     <button 
                       onClick={() => setIsLibraryOpen(false)}
@@ -768,14 +767,6 @@ export default function App() {
         // @ts-ignore
         webkitdirectory=""
         directory=""
-        multiple
-      />
-
-      <input
-        type="file"
-        ref={fileInputFilesRef}
-        onChange={handleFiles}
-        className="hidden"
         multiple
       />
     </div>
