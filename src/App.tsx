@@ -9,7 +9,6 @@ import {
   FolderOpen,
   ListMusic,
   X,
-  User,
   RotateCcw,
   Shuffle,
   Repeat,
@@ -266,11 +265,6 @@ export default function App() {
 
   const prevSong = () => {
     if (songs.length === 0) return;
-    if (audioRef.current && audioRef.current.currentTime > 3) {
-      audioRef.current.currentTime = 0;
-      setCurrentTime(0);
-      return;
-    }
     setCurrentSongIndex((prev) => (prev - 1 + songs.length) % songs.length);
     setIsPlaying(true);
   };
@@ -351,6 +345,27 @@ export default function App() {
       </button>
     ));
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in search
+      if (document.activeElement?.tagName === 'INPUT') return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        nextSong();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        prevSong();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, currentSongIndex, songs, playbackMode]);
 
   return (
     <div className="h-[100dvh] bg-[#0a0a0a] text-white font-sans selection:bg-blue-500/30 overflow-hidden flex flex-col">
@@ -438,9 +453,6 @@ export default function App() {
             <ListMusic className="w-5 h-5 group-hover:text-blue-400" />
             <span className="text-xs font-bold hidden sm:block">Library</span>
           </button>
-          <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg">
-            <User className="w-5 h-5 md:w-6 md:h-6 text-gray-400" />
-          </div>
         </div>
       </header>
 
@@ -703,7 +715,7 @@ export default function App() {
                 className="absolute inset-y-0 left-0 bg-[#0070f3] rounded-full shadow-[0_0_20px_rgba(0,112,243,0.7)]"
                 style={{ width: `${(currentTime / duration) * 100}%` }}
               >
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 bg-white border-2 border-[#0070f3] rounded-full shadow-[0_0_15px_rgba(0,112,243,0.9)] z-30" />
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 md:w-2.5 md:h-2.5 bg-white border-2 border-[#0070f3] rounded-full shadow-[0_0_15px_rgba(0,112,243,0.9)] z-30" />
               </motion.div>
             </div>
             <span className="text-[10px] md:text-xs font-medium text-blue-500/70 w-10">{formatTime(duration)}</span>
