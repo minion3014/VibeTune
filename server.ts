@@ -58,6 +58,7 @@ app.get("/auth/callback", async (req, res) => {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
+      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
     });
 
     res.send(`
@@ -77,7 +78,7 @@ app.get("/auth/callback", async (req, res) => {
     `);
   } catch (error) {
     console.error("Error exchanging code:", error);
-    res.status(500).send("Authentication failed");
+    res.status(500).send("Authentication failed: " + (error instanceof Error ? error.message : String(error)));
   }
 });
 
@@ -105,7 +106,7 @@ app.get("/api/drive/songs", async (req, res) => {
       // User info failed, not critical
     }
 
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || "1kc0rdWpjuH4rHI3xcbFt_q0fMTzE9djB";
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || "root";
     
     // Recursive function to fetch files from a folder and its subfolders with pagination
     async function fetchFilesRecursively(fid: string, folderNamePath: string[] = []): Promise<any[]> {
@@ -118,7 +119,7 @@ app.get("/api/drive/songs", async (req, res) => {
           q: `'${fid}' in parents and trashed = false`,
           fields: "nextPageToken, files(id, name, mimeType)",
           pageToken: pageToken,
-          pageSize: 100
+          pageSize: 1000
         });
 
         const files = resp.data.files || [];
@@ -136,7 +137,9 @@ app.get("/api/drive/songs", async (req, res) => {
       return allFiles;
     }
 
+    console.log(`Fetching files from Drive folder: ${folderId}`);
     const files = await fetchFilesRecursively(folderId);
+    console.log(`Found ${files.length} raw files in Drive`);
     
     // Process songs and lyrics
     // We'll group them by filename without extension, but also handle different folders
@@ -179,6 +182,7 @@ app.get("/api/drive/songs", async (req, res) => {
         });
       }
     }
+    console.log(`Processed ${songs.length} songs from Drive`);
 
     res.json({ songs, user });
   } catch (error: any) {

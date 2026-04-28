@@ -29,6 +29,8 @@ interface Song {
   lrcId?: string;
   isDrive?: boolean;
   hasLyrics?: boolean;
+  folder?: string;
+  path?: string[];
 }
 
 export default function App() {
@@ -36,6 +38,7 @@ export default function App() {
   const [allSongs, setAllSongs] = useState<Song[]>([]); 
   const [folders, setFolders] = useState<Map<string, Song[]>>(new Map());
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
+  const [currentPath, setCurrentPath] = useState<string[]>([]);
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -95,20 +98,23 @@ export default function App() {
     
     setRootFolderName(rootName);
     setActiveSource('local');
+    setCurrentPath([rootName]);
 
-    const songMap = new Map<string, { audio?: File; lrc?: File; folder: string }>();
+    const songMap = new Map<string, { audio?: File; lrc?: File; folder: string; path: string[] }>();
     const folderMap = new Map<string, Song[]>();
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      // On mobile/Android, webkitRelativePath is often empty
       const path = file.webkitRelativePath || file.name;
       const pathParts = path.split('/');
       
-      let folderName = rootName;
+      const parentFolders: string[] = [];
       if (file.webkitRelativePath) {
-        folderName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : 'Root';
+        for (let j = 0; j < pathParts.length - 1; j++) {
+          if (pathParts[j]) parentFolders.push(pathParts[j]);
+        }
       }
+      if (parentFolders.length === 0) parentFolders.push(rootName);
       
       const lastDotIndex = file.name.lastIndexOf('.');
       if (lastDotIndex === -1) continue;
@@ -116,12 +122,16 @@ export default function App() {
       const fileNameNoExt = file.name.substring(0, lastDotIndex).toLowerCase();
       const ext = file.name.substring(lastDotIndex + 1).toLowerCase();
 
+      const immediateParent = parentFolders[parentFolders.length - 1] || rootName;
+      const folderKey = parentFolders.join('/');
+      const uniqueKey = `${folderKey}:${fileNameNoExt}`;
+
       if (['mp3', 'wav', 'm4a', 'flac', 'ogg'].includes(ext)) {
-        const current = songMap.get(fileNameNoExt) || { folder: folderName };
-        songMap.set(fileNameNoExt, { ...current, audio: file });
+        const current = songMap.get(uniqueKey) || { folder: immediateParent, path: parentFolders };
+        songMap.set(uniqueKey, { ...current, audio: file });
       } else if (ext === 'txt' || ext === 'lrc') {
-        const current = songMap.get(fileNameNoExt) || { folder: folderName };
-        songMap.set(fileNameNoExt, { ...current, lrc: file });
+        const current = songMap.get(uniqueKey) || { folder: immediateParent, path: parentFolders };
+        songMap.set(uniqueKey, { ...current, lrc: file });
       }
     }
 
@@ -134,7 +144,7 @@ export default function App() {
             const lrcText = await data.lrc.text();
             lyrics = parseLRC(lrcText);
           } catch (e) {
-            // Error parsing lyrics silently handled
+            // Error parsing lyrics
           }
         }
 
@@ -143,42 +153,63 @@ export default function App() {
           const metadata = await mm.parseBlob(data.audio);
           artist = metadata.common.composer || metadata.common.artist || data.folder;
         } catch (e) {
-          // Error parsing metadata silently handled
+          // Error parsing metadata
         }
 
         const songName = data.audio.name.substring(0, data.audio.name.lastIndexOf('.'));
         const song: Song = {
-          id: Math.random().toString(36).substr(2, 9),
+          id: `local-${data.audio.name}-${data.path.join('-')}`,
           name: songName,
           artist,
           audioUrl: URL.createObjectURL(data.audio),
           lyrics,
           cover: `https://picsum.photos/seed/${data.audio.name}/400/400`,
+          isDrive: false,
+          folder: data.folder,
+          path: data.path
         };
 
         allLoadedSongs.push(song);
         
-        const folderSongs = folderMap.get(data.folder) || [];
-        folderMap.set(data.folder, [...folderSongs, song]);
+        // Ensure all parent folders are in the folderMap
+        let currentPathAcc = "";
+        data.path.forEach((folderName, idx) => {
+          currentPathAcc = idx === 0 ? folderName : `${currentPathAcc}/${folderName}`;
+          if (!folderMap.has(currentPathAcc)) {
+            folderMap.set(currentPathAcc, []);
+          }
+        });
+
+        const folderKey = data.path.join('/');
+        const folderSongs = folderMap.get(folderKey) || [];
+        folderMap.set(folderKey, [...folderSongs, song]);
       }
     }
 
     if (allLoadedSongs.length === 0) {
-      alert("Không tìm thấy file nhạc hợp lệ. Vui lòng chọn đồng thời cả file nhạc và file .txt tương ứng.");
+      alert("Không tìm thấy file nhạc hợp lệ.");
       return;
     }
 
+    // Clear previous local songs and folders to avoid duplication
     setAllSongs(prev => {
-      const ids = new Set(prev.map(s => s.id));
-      return [...prev, ...allLoadedSongs.filter(s => !ids.has(s.id))];
+      const filtered = prev.filter(s => s.isDrive);
+      return [...filtered, ...allLoadedSongs];
     });
+    
     setSongs(allLoadedSongs);
+    
     setFolders(prev => {
-      const next = new Map(prev);
-      folderMap.forEach((songs, name) => {
-        const existing = next.get(name) || [];
-        const ids = new Set(existing.map(s => s.id));
-        next.set(name, [...existing, ...songs.filter(s => !ids.has(s.id))]);
+      const next = new Map();
+      // Keep cloud folders
+      prev.forEach((songs, key) => {
+        if (songs.some(s => s.isDrive)) {
+          next.set(key, songs);
+        }
+      });
+      // Add new local folders
+      folderMap.forEach((songs, key) => {
+        next.set(key, songs);
       });
       return next;
     });
@@ -197,21 +228,73 @@ export default function App() {
     fileInputRef.current?.click();
   };
 
-  const selectFolder = (folderName: string) => {
-    const folderSongs = folders.get(folderName) || [];
+  const selectFolder = (folderKey: string) => {
+    const folderSongs = folders.get(folderKey) || [];
     setSongs(folderSongs);
-    setCurrentFolder(folderName);
+    setCurrentFolder(folderKey.split('/').pop() || folderKey);
     
-    // Update active source based on folder content
-    if (folderSongs.length > 0) {
-      setActiveSource(folderSongs[0].isDrive ? 'cloud' : 'local');
+    if (activeSource === 'local') {
+      setCurrentPath(folderKey.split('/'));
     }
 
-    setCurrentSongIndex(0);
-    setIsPlaying(true);
     setSearchQuery('');
     setShowSearchSuggestions(false);
   };
+
+  const switchToCloudSource = () => {
+    if (isGoogleLinked) {
+      setActiveSource('cloud');
+      setCurrentFolder(null);
+      // Update songs list to show ALL cloud songs immediately
+      setSongs(allSongs.filter(s => s.isDrive));
+      fetchGoogleSongs(true); // Refresh on switch with manual flag
+    } else {
+      handleGoogleConnect();
+    }
+  };
+
+  const switchToLocalSource = () => {
+    if (activeSource === 'local' || !rootFolderName) {
+      triggerFileSelect();
+    } else {
+      setActiveSource('local');
+      setCurrentFolder(null);
+      // Update songs list to show ALL local songs immediately
+      setSongs(allSongs.filter(s => !s.isDrive));
+    }
+  };
+
+  const visibleFolders = useMemo(() => {
+    const folderKeys = Array.from(folders.keys());
+    return folderKeys.filter(name => {
+      const folderSongs = folders.get(name) || [];
+      const isDriveFolder = folderSongs.some(s => s.isDrive);
+      
+      if (activeSource === 'cloud') {
+        if (!isDriveFolder) return false;
+        // Simple cloud view for now
+        return !currentFolder;
+      }
+      
+      if (activeSource === 'local') {
+        if (isDriveFolder) return false;
+        const currentPrefix = currentPath.join('/');
+        
+        // If we have a path, hide the current folder/path itself from the list
+        if (name === currentPrefix) return false;
+        
+        // If we are at root level (rootFolderName), show only its direct children
+        // Match direct children only: name starts with prefix/ and has exactly one more segment
+        if (currentPrefix) {
+          return name.startsWith(currentPrefix + '/') && name.split('/').length === currentPath.length + 1;
+        }
+        
+        // Fallback for empty root or if some keys don't have the root prefix
+        return name.split('/').length === 1;
+      }
+      return true;
+    }).sort();
+  }, [folders, activeSource, currentPath, currentFolder]);
 
   const handleGoogleConnect = async () => {
     try {
@@ -223,17 +306,21 @@ export default function App() {
     }
   };
 
-  const fetchGoogleSongs = async () => {
+  const fetchGoogleSongs = async (isManual = false) => {
     setIsLoadingDrive(true);
     try {
       const resp = await fetch('/api/drive/songs');
-      const data = await resp.json();
       
-      if (resp.status === 401) {
-        setIsGoogleLinked(false);
-        setGoogleUser(null);
-        return;
+      if (!resp.ok) {
+        if (resp.status === 401) {
+          setIsGoogleLinked(false);
+          setGoogleUser(null);
+          return;
+        }
+        throw new Error(`Server returned ${resp.status}`);
       }
+
+      const data = await resp.json();
       
       if (!data || typeof data !== 'object') {
          return;
@@ -244,7 +331,14 @@ export default function App() {
       
       setGoogleUser(driveUser);
       setIsGoogleLinked(true);
-      setActiveSource('cloud');
+      
+      // If no local files and we found drive songs, or if we manually refreshed
+      if (driveSongs.length > 0) {
+        if (!activeSource || isManual) {
+          setActiveSource('cloud');
+        }
+      }
+      
       const songsWithDriveFlag = driveSongs.map((s: any) => ({ ...s, isDrive: true, lyrics: s.lyrics || [] }));
       
       const newFolders = new Map(folders);
@@ -255,22 +349,33 @@ export default function App() {
         return [...existing, ...incoming.filter(s => !ids.has(s.id))];
       };
 
-      // Group by folder from Drive
+      // Group by folder from Drive (handling nested folders)
       songsWithDriveFlag.forEach((song: any) => {
-        const folderName = song.folder === "Root" ? "Google Drive" : song.folder;
-        const folderSongs = newFolders.get(folderName) || [];
-        newFolders.set(folderName, mergeSongs(folderSongs, [song]));
+        const pathParts = song.folder.split('/');
+        const foldersToAddTo = (pathParts.length === 1 && pathParts[0] === "Root")
+          ? ["Google Drive"]
+          : pathParts;
+        
+        foldersToAddTo.forEach(folderName => {
+          if (!folderName) return;
+          const folderSongs = newFolders.get(folderName) || [];
+          newFolders.set(folderName, mergeSongs(folderSongs, [song]));
+        });
       });
 
       // Also keep a "All Drive Songs" folder
       newFolders.set("All Drive Songs", songsWithDriveFlag);
       
       setAllSongs(prev => mergeSongs(prev, songsWithDriveFlag));
-      setSongs(prev => mergeSongs(prev, songsWithDriveFlag));
+      
+      // Update current song view if we are on cloud or just loaded it
+      if (activeSource === 'cloud' || (!activeSource && driveSongs.length > 0)) {
+        setSongs(prev => mergeSongs(prev, songsWithDriveFlag));
+      }
       
       setFolders(newFolders);
     } catch (e) {
-      // Fetch failed
+      console.error("Failed to fetch Google Drive songs:", e);
     } finally {
       setIsLoadingDrive(false);
     }
@@ -330,8 +435,30 @@ export default function App() {
   }, [currentSong?.id, currentSong?.lrcId]);
 
   const resetFilter = () => {
-    setSongs(allSongs);
+    let filtered = allSongs;
+    if (activeSource === 'cloud') {
+      filtered = allSongs.filter(s => s.isDrive);
+      setCurrentPath([]);
+    } else if (activeSource === 'local') {
+      filtered = allSongs.filter(s => !s.isDrive);
+      if (rootFolderName) setCurrentPath([rootFolderName]);
+    }
+    setSongs(filtered);
     setCurrentFolder(null);
+  };
+
+  const goBack = () => {
+    if (activeSource === 'local' && currentPath.length > 1) {
+      const newPath = currentPath.slice(0, -1);
+      setCurrentPath(newPath);
+      const folderKey = newPath.join('/');
+      // When going back, show all songs in this parent folder (from all its children too)
+      const folderSongs = allSongs.filter(s => !s.isDrive && s.path?.join('/').startsWith(folderKey));
+      setSongs(folderSongs);
+      setCurrentFolder(newPath.length > 1 ? newPath[newPath.length - 1] : null);
+    } else {
+      resetFilter();
+    }
   };
 
   const songSuggestions = useMemo(() => {
@@ -436,7 +563,12 @@ export default function App() {
     });
   }, [currentSong, currentTime]);
 
-  const filteredSongs = songs.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredSongsDisplay = songs.filter(s => {
+    const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase());
+    if (activeSource === 'cloud') return matchesSearch && s.isDrive;
+    if (activeSource === 'local') return matchesSearch && !s.isDrive;
+    return matchesSearch;
+  });
 
   const formatTime = (time: number) => {
     const mins = Math.floor(time / 60);
@@ -445,7 +577,7 @@ export default function App() {
   };
 
   const renderSongList = () => {
-    if (filteredSongs.length === 0) {
+    if (filteredSongsDisplay.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-6 bg-white/5 border border-dashed border-white/10 rounded-2xl mx-1">
           <Music className="w-12 h-12 mb-4 opacity-20" />
@@ -474,7 +606,7 @@ export default function App() {
       );
     }
 
-    return filteredSongs.map((song) => (
+    return filteredSongsDisplay.map((song) => (
       <button
         key={song.id}
         onClick={() => {
@@ -687,17 +819,17 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button 
-                    onClick={isGoogleLinked ? fetchGoogleSongs : handleGoogleConnect}
+                    onClick={switchToCloudSource}
                     className={`p-2 rounded-lg transition-colors flex items-center justify-center relative ${activeSource === 'cloud' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'}`}
-                    title={isGoogleLinked ? "Refresh Drive" : "Connect Google Drive"}
+                    title={isGoogleLinked ? "Switch to Cloud" : "Connect Google Drive"}
                   >
                     <Cloud className={`w-5 h-5 ${isLoadingDrive ? 'animate-pulse' : ''}`} />
                     {isLoadingDrive && <RotateCcw className="w-3.5 h-3.5 absolute animate-spin opacity-50" />}
                   </button>
                   <button 
-                    onClick={() => triggerFileSelect()}
+                    onClick={switchToLocalSource}
                     className={`p-2 rounded-lg transition-colors flex items-center justify-center ${activeSource === 'local' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'}`}
-                    title="Open Folder"
+                    title="Switch to Local"
                   >
                     <FolderOpen className="w-5 h-5" />
                   </button>
@@ -729,14 +861,17 @@ export default function App() {
                 )}
 
                 <div className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar">
-                  {!currentFolder && folders.size > 0 && searchQuery === "" && (
+                  {searchQuery === "" && (
                     <div className="mb-6 space-y-1">
-                      <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                        Folders / Categories
-                      </div>
-                      {Array.from(folders.keys()).sort().map(name => {
+                      {visibleFolders.length > 0 && (
+                        <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                          Folders / Categories
+                        </div>
+                      )}
+                      {visibleFolders.map(name => {
                         const folderSongs = folders.get(name) || [];
                         const isDriveFolder = folderSongs.some(s => s.isDrive);
+                        const displayName = name.split('/').pop();
                         return (
                           <button 
                             key={name}
@@ -751,16 +886,20 @@ export default function App() {
                               )}
                             </div>
                             <div className="flex-1 truncate">
-                              <p className={`font-bold truncate transition-colors ${currentFolder === name ? 'text-blue-300' : 'group-hover:text-blue-300'}`}>{name}</p>
+                              <p className={`font-bold truncate transition-colors ${currentFolder === name ? 'text-blue-300' : 'group-hover:text-blue-300'}`}>{displayName}</p>
                               <p className="text-[11px] text-gray-500">{folderSongs.length} tracks</p>
                             </div>
                           </button>
                         );
                       })}
-                      <div className="border-b border-white/5 my-4 mx-2" />
-                      <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                        All Tracks
-                      </div>
+                      {!currentFolder && visibleFolders.length > 0 && (
+                        <>
+                          <div className="border-b border-white/5 my-4 mx-2" />
+                          <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                            All Tracks
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                   {renderSongList()}
@@ -829,14 +968,14 @@ export default function App() {
                   </div>
                   <div className="flex items-center gap-3">
                     <button 
-                      onClick={isGoogleLinked ? fetchGoogleSongs : handleGoogleConnect}
+                      onClick={switchToCloudSource}
                       className={`p-3 rounded-2xl transition-colors ${activeSource === 'cloud' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
-                      title="Drive"
+                      title="Cloud"
                     >
                       <Cloud className={`w-6 h-6 ${isLoadingDrive ? 'animate-pulse' : ''}`} />
                     </button>
                     <button 
-                      onClick={() => triggerFileSelect()}
+                      onClick={switchToLocalSource}
                       className={`p-3 rounded-2xl transition-colors ${activeSource === 'local' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
                       title="Local"
                     >
@@ -846,15 +985,13 @@ export default function App() {
                 </div>
 
                 <div className="flex-1 overflow-hidden flex flex-col p-4">
-                  {currentFolder && (
+                  {(currentFolder || (activeSource === 'local' && currentPath.length > (rootFolderName ? 1 : 0))) && (
                     <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center gap-3 mb-6">
-                      {songs.some(s => s.isDrive) ? (
-                        <Cloud className="w-5 h-5 text-blue-400" />
-                      ) : (
-                        <FolderOpen className="w-5 h-5 text-blue-400" />
-                      )}
+                      <button onClick={goBack} className="p-2 bg-blue-500/20 hover:bg-blue-500/30 rounded-lg transition-colors">
+                        <SkipBack className="w-4 h-4 text-blue-400" />
+                      </button>
                       <div className="flex-1 overflow-hidden">
-                        <p className="text-sm font-bold text-blue-400 truncate">{currentFolder}</p>
+                        <p className="text-sm font-bold text-blue-400 truncate">{currentFolder || "Main Directory"}</p>
                         <p className="text-xs text-blue-400/60">{songs.length} items</p>
                       </div>
                       <button onClick={resetFilter} className="p-1">
@@ -864,14 +1001,17 @@ export default function App() {
                   )}
 
                   <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pb-12">
-                    {!currentFolder && folders.size > 0 && searchQuery === "" && (
+                    {searchQuery === "" && (
                       <div className="mb-6 space-y-2">
-                        <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                          Folders / Categories
-                        </div>
-                        {Array.from(folders.keys()).sort().map(name => {
+                        {visibleFolders.length > 0 && (
+                          <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest flex justify-between items-center">
+                            <span>Folders / Categories</span>
+                          </div>
+                        )}
+                        {visibleFolders.map(name => {
                           const folderSongs = folders.get(name) || [];
                           const isDriveFolder = folderSongs.some(s => s.isDrive);
+                          const displayName = name.split('/').pop();
                           return (
                             <button 
                               key={name}
@@ -886,15 +1026,15 @@ export default function App() {
                                 )}
                               </div>
                               <div className="flex-1 truncate">
-                                <p className="font-bold text-base truncate group-hover:text-blue-300 transition-colors">{name}</p>
+                                <p className="font-bold text-base truncate group-hover:text-blue-300 transition-colors">{displayName}</p>
                                 <p className="text-xs text-gray-500">{folderSongs.length} tracks</p>
                               </div>
                             </button>
                           );
                         })}
-                        <div className="border-b border-white/5 my-6" />
+                        {visibleFolders.length > 0 && <div className="border-b border-white/5 my-6" />}
                         <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                          All Tracks
+                          {currentFolder ? 'Tracks in Folder' : 'All Tracks'}
                         </div>
                       </div>
                     )}
