@@ -12,7 +12,8 @@ import {
   RotateCcw,
   Shuffle,
   Repeat,
-  Mic2
+  Mic2,
+  Cloud
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as mm from 'music-metadata-browser';
@@ -25,6 +26,9 @@ interface Song {
   lyrics: LyricLine[];
   artist: string;
   cover: string;
+  lrcId?: string;
+  isDrive?: boolean;
+  hasLyrics?: boolean;
 }
 
 export default function App() {
@@ -38,10 +42,15 @@ export default function App() {
   const [duration, setDuration] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
-  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(true);
   const [rootFolderName, setRootFolderName] = useState<string | null>(null);
   const [playbackMode, setPlaybackMode] = useState<'normal' | 'shuffle' | 'repeat'>('normal');
   const [showLyricsView, setShowLyricsView] = useState(false);
+  const [isGoogleLinked, setIsGoogleLinked] = useState(false);
+  const [googleUser, setGoogleUser] = useState<{ name: string; picture: string } | null>(null);
+  const [isLoadingDrive, setIsLoadingDrive] = useState(false);
+  const [isLyricsLoading, setIsLyricsLoading] = useState(false);
+  const [activeSource, setActiveSource] = useState<'cloud' | 'local' | null>(null);
   
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,6 +94,7 @@ export default function App() {
       : 'Imported Files';
     
     setRootFolderName(rootName);
+    setActiveSource('local');
 
     const songMap = new Map<string, { audio?: File; lrc?: File; folder: string }>();
     const folderMap = new Map<string, Song[]>();
@@ -124,7 +134,7 @@ export default function App() {
             const lrcText = await data.lrc.text();
             lyrics = parseLRC(lrcText);
           } catch (e) {
-            console.error(`Error parsing lyrics for ${data.audio.name}:`, e);
+            // Error parsing lyrics silently handled
           }
         }
 
@@ -133,7 +143,7 @@ export default function App() {
           const metadata = await mm.parseBlob(data.audio);
           artist = metadata.common.composer || metadata.common.artist || data.folder;
         } catch (e) {
-          console.warn(`Error parsing metadata for ${data.audio.name}:`, e);
+          // Error parsing metadata silently handled
         }
 
         const songName = data.audio.name.substring(0, data.audio.name.lastIndexOf('.'));
@@ -158,9 +168,20 @@ export default function App() {
       return;
     }
 
-    setAllSongs(allLoadedSongs);
+    setAllSongs(prev => {
+      const ids = new Set(prev.map(s => s.id));
+      return [...prev, ...allLoadedSongs.filter(s => !ids.has(s.id))];
+    });
     setSongs(allLoadedSongs);
-    setFolders(folderMap);
+    setFolders(prev => {
+      const next = new Map(prev);
+      folderMap.forEach((songs, name) => {
+        const existing = next.get(name) || [];
+        const ids = new Set(existing.map(s => s.id));
+        next.set(name, [...existing, ...songs.filter(s => !ids.has(s.id))]);
+      });
+      return next;
+    });
     setCurrentFolder(null);
     
     if (allLoadedSongs.length > 0) {
@@ -180,32 +201,169 @@ export default function App() {
     const folderSongs = folders.get(folderName) || [];
     setSongs(folderSongs);
     setCurrentFolder(folderName);
+    
+    // Update active source based on folder content
+    if (folderSongs.length > 0) {
+      setActiveSource(folderSongs[0].isDrive ? 'cloud' : 'local');
+    }
+
     setCurrentSongIndex(0);
     setIsPlaying(true);
     setSearchQuery('');
     setShowSearchSuggestions(false);
   };
 
+  const handleGoogleConnect = async () => {
+    try {
+      const resp = await fetch('/api/auth/google/url');
+      const { url } = await resp.json();
+      window.open(url, 'google_auth', 'width=500,height=600');
+    } catch (e) {
+      // Auth URL failed
+    }
+  };
+
+  const fetchGoogleSongs = async () => {
+    setIsLoadingDrive(true);
+    try {
+      const resp = await fetch('/api/drive/songs');
+      const data = await resp.json();
+      
+      if (resp.status === 401) {
+        setIsGoogleLinked(false);
+        setGoogleUser(null);
+        return;
+      }
+      
+      if (!data || typeof data !== 'object') {
+         return;
+      }
+
+      const driveSongs = data.songs || [];
+      const driveUser = data.user || null;
+      
+      setGoogleUser(driveUser);
+      setIsGoogleLinked(true);
+      setActiveSource('cloud');
+      const songsWithDriveFlag = driveSongs.map((s: any) => ({ ...s, isDrive: true, lyrics: s.lyrics || [] }));
+      
+      const newFolders = new Map(folders);
+      
+      // Helper for unique song merging
+      const mergeSongs = (existing: Song[], incoming: Song[]) => {
+        const ids = new Set(existing.map(s => s.id));
+        return [...existing, ...incoming.filter(s => !ids.has(s.id))];
+      };
+
+      // Group by folder from Drive
+      songsWithDriveFlag.forEach((song: any) => {
+        const folderName = song.folder === "Root" ? "Google Drive" : song.folder;
+        const folderSongs = newFolders.get(folderName) || [];
+        newFolders.set(folderName, mergeSongs(folderSongs, [song]));
+      });
+
+      // Also keep a "All Drive Songs" folder
+      newFolders.set("All Drive Songs", songsWithDriveFlag);
+      
+      setAllSongs(prev => mergeSongs(prev, songsWithDriveFlag));
+      setSongs(prev => mergeSongs(prev, songsWithDriveFlag));
+      
+      setFolders(newFolders);
+    } catch (e) {
+      // Fetch failed
+    } finally {
+      setIsLoadingDrive(false);
+    }
+  };
+
+  useEffect(() => {
+    // Initial silent check on mount
+    fetchGoogleSongs();
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+        fetchGoogleSongs();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []); // Only register once
+
+  // Handle Google Lyrics fetching
+  useEffect(() => {
+    if (currentSong?.isDrive && currentSong.lrcId && (!currentSong.lyrics || currentSong.lyrics.length === 0)) {
+      const songIdAtFetch = currentSong.id;
+      setIsLyricsLoading(true);
+      
+      fetch(`/api/drive/lyrics/${currentSong.lrcId}`)
+        .then(r => {
+          if (!r.ok) throw new Error(`Fetch failed: ${r.statusText}`);
+          return r.text();
+        })
+        .then(text => {
+          if (!text || text.trim() === "") return;
+          
+          const parsed = parseLRC(text);
+          if (parsed.length === 0) return;
+
+          const updateSong = (s: Song) => s.id === songIdAtFetch ? { ...s, lyrics: parsed, hasLyrics: true } : s;
+          
+          setSongs(prev => prev.map(updateSong));
+          setAllSongs(prev => prev.map(updateSong));
+          setFolders(prev => {
+            const next = new Map(prev);
+            for (const [key, val] of next.entries()) {
+              next.set(key, val.map(updateSong));
+            }
+            return next;
+          });
+        })
+        .catch(err => {
+          // Error handling
+        })
+        .finally(() => {
+          setIsLyricsLoading(false);
+        });
+    }
+  }, [currentSong?.id, currentSong?.lrcId]);
+
   const resetFilter = () => {
     setSongs(allSongs);
     setCurrentFolder(null);
   };
 
-  const folderSuggestions = useMemo(() => {
+  const songSuggestions = useMemo(() => {
     if (!searchQuery) return [];
-    return Array.from(folders.keys()).filter(name => 
-      name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [searchQuery, folders]);
+    const lowerQuery = searchQuery.toLowerCase();
+    return allSongs.filter(s => 
+      s.name.toLowerCase().includes(lowerQuery) || 
+      s.artist.toLowerCase().includes(lowerQuery)
+    ).slice(0, 10);
+  }, [searchQuery, allSongs]);
+
+  const playAudio = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    try {
+      await audio.play();
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        // Playback error
+      }
+    }
+  };
 
   // Playback logic
   useEffect(() => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.play().catch(e => console.error("Playback failed", e));
-      } else {
-        audioRef.current.pause();
-      }
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      playAudio();
+    } else {
+      audio.pause();
     }
   }, [isPlaying, currentSongIndex]);
 
@@ -235,7 +393,8 @@ export default function App() {
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       setCurrentTime(0);
-      if (!isPlaying) setIsPlaying(true);
+      setIsPlaying(true);
+      playAudio();
     }
   };
 
@@ -245,7 +404,7 @@ export default function App() {
     if (playbackMode === 'repeat') {
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(console.error);
+        playAudio();
       }
       setIsPlaying(true);
       return;
@@ -288,21 +447,29 @@ export default function App() {
   const renderSongList = () => {
     if (filteredSongs.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-4 border border-dashed border-white/10 rounded-2xl mx-2">
-          <Music className="w-10 h-10 mb-4 opacity-10" />
-          <p className="text-sm font-medium">No tracks found</p>
+        <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-6 bg-white/5 border border-dashed border-white/10 rounded-2xl mx-1">
+          <Music className="w-12 h-12 mb-4 opacity-20" />
+          <p className="text-sm font-bold text-gray-300">No tracks in library</p>
           
-          <div className="mt-4 space-y-2 flex flex-col items-center">
+          <div className="mt-6 space-y-3 w-full max-w-[200px]">
+            <button 
+              onClick={isGoogleLinked ? fetchGoogleSongs : handleGoogleConnect}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-xl transition-all text-xs font-black uppercase tracking-wider"
+            >
+              <Cloud className="w-4 h-4" />
+              Manage Cloud
+            </button>
             <button 
               onClick={() => triggerFileSelect()}
-              className="text-xs font-bold text-blue-400 hover:underline px-6 py-2.5 bg-blue-500/10 rounded-xl transition-all hover:bg-blue-500/20"
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl transition-all text-xs font-black uppercase tracking-wider"
             >
-              Open Music Folder
+              <FolderOpen className="w-4 h-4" />
+              Open Folder
             </button>
-            <p className="text-[9px] opacity-40 max-w-[180px]">
-              Select a folder containing your music and .txt lyrics.
-            </p>
           </div>
+          <p className="mt-4 text-[10px] opacity-40 leading-relaxed italic">
+            Connect to Google Drive or select a local folder to start your session
+          </p>
         </div>
       );
     }
@@ -311,8 +478,13 @@ export default function App() {
       <button
         key={song.id}
         onClick={() => {
-          setCurrentSongIndex(songs.indexOf(song));
-          setIsPlaying(true);
+          const index = songs.indexOf(song);
+          if (index === currentSongIndex) {
+            handleReplay();
+          } else {
+            setCurrentSongIndex(index);
+            setIsPlaying(true);
+          }
           if (window.innerWidth < 768) setIsLibraryOpen(false);
         }}
         className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group border border-transparent ${
@@ -339,7 +511,16 @@ export default function App() {
           )}
         </div>
         <div className="flex-1 text-left overflow-hidden">
-          <p className={`font-bold truncate text-sm ${currentSong?.id === song.id ? 'text-blue-400' : 'text-gray-200'}`}>{song.name}</p>
+          <div className="flex items-center gap-2">
+            <p className={`font-bold truncate text-sm ${currentSong?.id === song.id ? 'text-blue-400' : 'text-gray-200'}`}>
+              {song.name}
+            </p>
+            {song.hasLyrics && (
+              <span className="flex-shrink-0 px-1 py-0.5 bg-blue-500/20 text-blue-400 text-[8px] font-black rounded border border-blue-500/30 uppercase tracking-tighter">
+                LRC
+              </span>
+            )}
+          </div>
           <p className="text-[11px] opacity-50 truncate font-medium">{song.artist}</p>
         </div>
       </button>
@@ -409,23 +590,32 @@ export default function App() {
                     ) : (
                       <>
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest flex justify-between items-center">
-                          <span>Categories / Folders</span>
+                          <span>Songs Match</span>
                         </div>
                         
-                        {folderSuggestions.length > 0 ? (
+                        {songSuggestions.length > 0 ? (
                           <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
-                            {folderSuggestions.map(name => (
+                            {songSuggestions.map(song => (
                               <button 
-                                key={name}
-                                onClick={() => selectFolder(name)}
+                                key={song.id}
+                                onClick={() => {
+                                  // Search globally across all songs
+                                  const index = allSongs.indexOf(song);
+                                  setSongs(allSongs);
+                                  setCurrentFolder(null);
+                                  setCurrentSongIndex(index);
+                                  setIsPlaying(true);
+                                  setSearchQuery('');
+                                  setShowSearchSuggestions(false);
+                                }}
                                 className="w-full flex items-center gap-3 p-4 md:p-3 hover:bg-blue-600/20 text-white rounded-xl transition-all text-sm text-left group"
                               >
-                                <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
-                                  <FolderOpen className="w-5 h-5 text-gray-400 group-hover:text-blue-400" />
+                                <div className="w-10 h-10 bg-white/5 rounded-lg overflow-hidden flex-shrink-0">
+                                  <img src={song.cover} alt="" className="w-full h-full object-cover" />
                                 </div>
                                 <div className="flex-1 truncate">
-                                  <p className="font-bold truncate group-hover:text-blue-300 transition-colors">{name}</p>
-                                  <p className="text-[11px] text-gray-500">{folders.get(name)?.length} tracks</p>
+                                  <p className="font-bold truncate group-hover:text-blue-300 transition-colors">{song.name}</p>
+                                  <p className="text-[11px] text-gray-500">{song.artist}</p>
                                 </div>
                               </button>
                             ))}
@@ -433,7 +623,7 @@ export default function App() {
                         ) : (
                           <div className="p-12 text-center text-gray-500">
                             <Search className="w-10 h-10 mx-auto mb-4 opacity-20" />
-                            <p className="text-sm">No folders matching "{searchQuery}"</p>
+                            <p className="text-sm">No songs matching "{searchQuery}"</p>
                           </div>
                         )}
                       </>
@@ -473,18 +663,43 @@ export default function App() {
               }}
               className="hidden md:flex flex-col border-r border-white/10 bg-black/20 backdrop-blur-md overflow-hidden h-full"
             >
-              <div className="p-6 border-b border-white/5 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <ListMusic className="w-5 h-5 text-blue-400" />
-                  <span className="font-black tracking-tight text-lg uppercase">Library</span>
+              <div className="pl-6 pr-3 py-6 border-b border-white/5 flex items-center justify-between">
+                <div className="flex-1 overflow-hidden pr-4">
+                  {activeSource === 'cloud' && isGoogleLinked && googleUser ? (
+                    <div className="flex items-center gap-3">
+                      <img src={googleUser.picture} className="w-12 h-12 rounded-full border border-blue-500/30 shadow-md" alt="" referrerPolicy="no-referrer" />
+                      <div className="overflow-hidden">
+                        <p className="font-black text-blue-400 text-sm uppercase leading-none truncate">{googleUser.name}</p>
+                        <p className="text-[9px] text-blue-400/40 font-bold uppercase tracking-widest mt-1">Cloud Storage</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20">
+                        <ListMusic className="w-6 h-6 text-blue-400" />
+                      </div>
+                      <div className="overflow-hidden">
+                        <p className="font-black text-white text-sm uppercase leading-none truncate">Library</p>
+                        <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-1">{activeSource === 'local' && rootFolderName ? 'Local Folder' : 'No Source'}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <button 
+                    onClick={isGoogleLinked ? fetchGoogleSongs : handleGoogleConnect}
+                    className={`p-2 rounded-lg transition-colors flex items-center justify-center relative ${activeSource === 'cloud' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'}`}
+                    title={isGoogleLinked ? "Refresh Drive" : "Connect Google Drive"}
+                  >
+                    <Cloud className={`w-5 h-5 ${isLoadingDrive ? 'animate-pulse' : ''}`} />
+                    {isLoadingDrive && <RotateCcw className="w-3.5 h-3.5 absolute animate-spin opacity-50" />}
+                  </button>
+                  <button 
                     onClick={() => triggerFileSelect()}
-                    className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors text-blue-400"
+                    className={`p-2 rounded-lg transition-colors flex items-center justify-center ${activeSource === 'local' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'}`}
                     title="Open Folder"
                   >
-                    <FolderOpen className="w-4 h-4" />
+                    <FolderOpen className="w-5 h-5" />
                   </button>
                   <button 
                     onClick={() => setIsLibraryOpen(false)}
@@ -498,7 +713,11 @@ export default function App() {
               <div className="flex-1 overflow-hidden flex flex-col p-2 pt-4">
                 {currentFolder && (
                   <div className="mx-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center gap-3 mb-4">
-                    <FolderOpen className="w-4 h-4 text-blue-400" />
+                    {songs.some(s => s.isDrive) ? (
+                      <Cloud className="w-4 h-4 text-blue-400" />
+                    ) : (
+                      <FolderOpen className="w-4 h-4 text-blue-400" />
+                    )}
                     <div className="flex-1 overflow-hidden">
                       <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
                       <p className="text-[10px] text-blue-400/60">{songs.length} tracks</p>
@@ -510,6 +729,40 @@ export default function App() {
                 )}
 
                 <div className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar">
+                  {!currentFolder && folders.size > 0 && searchQuery === "" && (
+                    <div className="mb-6 space-y-1">
+                      <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                        Folders / Categories
+                      </div>
+                      {Array.from(folders.keys()).sort().map(name => {
+                        const folderSongs = folders.get(name) || [];
+                        const isDriveFolder = folderSongs.some(s => s.isDrive);
+                        return (
+                          <button 
+                            key={name}
+                            onClick={() => selectFolder(name)}
+                            className="w-full flex items-center gap-3 p-3 hover:bg-blue-600/10 text-white rounded-xl transition-all text-sm text-left group border border-transparent"
+                          >
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${isDriveFolder ? 'bg-blue-500/10 group-hover:bg-blue-500/20' : 'bg-white/5 group-hover:bg-white/10'}`}>
+                              {isDriveFolder ? (
+                                <Cloud className={`w-5 h-5 ${currentFolder === name ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'}`} />
+                              ) : (
+                                <FolderOpen className={`w-5 h-5 ${currentFolder === name ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'}`} />
+                              )}
+                            </div>
+                            <div className="flex-1 truncate">
+                              <p className={`font-bold truncate transition-colors ${currentFolder === name ? 'text-blue-300' : 'group-hover:text-blue-300'}`}>{name}</p>
+                              <p className="text-[11px] text-gray-500">{folderSongs.length} tracks</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                      <div className="border-b border-white/5 my-4 mx-2" />
+                      <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                        All Tracks
+                      </div>
+                    </div>
+                  )}
                   {renderSongList()}
                 </div>
               </div>
@@ -531,6 +784,12 @@ export default function App() {
               
               <motion.div 
                 key="mobile-library"
+                drag="y"
+                dragConstraints={{ top: 0 }}
+                dragElastic={0.2}
+                onDragEnd={(_, info) => {
+                  if (info.offset.y > 150) setIsLibraryOpen(false);
+                }}
                 initial={{ y: '100%' }}
                 animate={{ y: 0 }}
                 exit={{ y: '100%', opacity: 0 }}
@@ -540,30 +799,48 @@ export default function App() {
                   stiffness: 180,
                   opacity: { duration: 0.15 } 
                 }}
-                className="md:hidden fixed bottom-0 left-0 right-0 h-[80vh] bg-[#161616] border-t border-white/10 z-[160] flex flex-col rounded-t-[32px] shadow-2xl overflow-hidden"
+                className="md:hidden fixed bottom-0 left-0 right-0 h-[85vh] bg-[#0c0c0c] border-t border-white/10 z-[160] flex flex-col rounded-t-[40px] shadow-2xl overflow-hidden"
               >
                 <div className="flex justify-center pt-3 pb-1">
                   <div className="w-12 h-1.5 bg-white/10 rounded-full" />
                 </div>
 
-                <div className="px-6 py-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <ListMusic className="w-5 h-5 text-blue-400" />
-                    <span className="font-bold text-lg">Your Library</span>
+                <div className="pl-8 pr-4 py-6 flex items-center justify-between">
+                  <div className="flex-1 overflow-hidden pr-6">
+                    {activeSource === 'cloud' && isGoogleLinked && googleUser ? (
+                      <div className="flex items-center gap-4">
+                        <img src={googleUser.picture} className="w-14 h-14 rounded-full border-2 border-blue-500/30 shadow-lg" alt="" referrerPolicy="no-referrer" />
+                        <div className="overflow-hidden">
+                          <p className="font-black text-blue-400 text-lg uppercase leading-none truncate">{googleUser.name}</p>
+                          <p className="text-[9px] text-blue-400/50 font-bold uppercase tracking-widest mt-1.5">Cloud Connected</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 bg-blue-500/10 rounded-full flex items-center justify-center border-2 border-blue-500/20">
+                          <ListMusic className="w-7 h-7 text-blue-400" />
+                        </div>
+                        <div className="overflow-hidden">
+                          <p className="font-black text-white text-lg uppercase leading-none truncate">Library</p>
+                          <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-1.5">{activeSource === 'local' && rootFolderName ? 'Local Folder' : 'Select Source'}</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <button 
-                      onClick={() => triggerFileSelect()}
-                      className="p-2 bg-blue-500/10 rounded-full text-blue-400"
-                      title="Open Folder"
+                      onClick={isGoogleLinked ? fetchGoogleSongs : handleGoogleConnect}
+                      className={`p-3 rounded-2xl transition-colors ${activeSource === 'cloud' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
+                      title="Drive"
                     >
-                      <FolderOpen className="w-5 h-5" />
+                      <Cloud className={`w-6 h-6 ${isLoadingDrive ? 'animate-pulse' : ''}`} />
                     </button>
                     <button 
-                      onClick={() => setIsLibraryOpen(false)}
-                      className="p-2 bg-white/5 rounded-full"
+                      onClick={() => triggerFileSelect()}
+                      className={`p-3 rounded-2xl transition-colors ${activeSource === 'local' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
+                      title="Local"
                     >
-                      <X className="w-5 h-5" />
+                      <FolderOpen className="w-6 h-6" />
                     </button>
                   </div>
                 </div>
@@ -571,7 +848,11 @@ export default function App() {
                 <div className="flex-1 overflow-hidden flex flex-col p-4">
                   {currentFolder && (
                     <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center gap-3 mb-6">
-                      <FolderOpen className="w-5 h-5 text-blue-400" />
+                      {songs.some(s => s.isDrive) ? (
+                        <Cloud className="w-5 h-5 text-blue-400" />
+                      ) : (
+                        <FolderOpen className="w-5 h-5 text-blue-400" />
+                      )}
                       <div className="flex-1 overflow-hidden">
                         <p className="text-sm font-bold text-blue-400 truncate">{currentFolder}</p>
                         <p className="text-xs text-blue-400/60">{songs.length} items</p>
@@ -583,6 +864,40 @@ export default function App() {
                   )}
 
                   <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pb-12">
+                    {!currentFolder && folders.size > 0 && searchQuery === "" && (
+                      <div className="mb-6 space-y-2">
+                        <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                          Folders / Categories
+                        </div>
+                        {Array.from(folders.keys()).sort().map(name => {
+                          const folderSongs = folders.get(name) || [];
+                          const isDriveFolder = folderSongs.some(s => s.isDrive);
+                          return (
+                            <button 
+                              key={name}
+                              onClick={() => selectFolder(name)}
+                              className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-blue-600/10 text-white rounded-2xl transition-all text-sm text-left group"
+                            >
+                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${isDriveFolder ? 'bg-blue-500/10 group-hover:bg-blue-500/20' : 'bg-white/5 group-hover:bg-white/10'}`}>
+                                {isDriveFolder ? (
+                                  <Cloud className="w-6 h-6 text-gray-400 group-hover:text-blue-400" />
+                                ) : (
+                                  <FolderOpen className="w-6 h-6 text-gray-400 group-hover:text-blue-400" />
+                                )}
+                              </div>
+                              <div className="flex-1 truncate">
+                                <p className="font-bold text-base truncate group-hover:text-blue-300 transition-colors">{name}</p>
+                                <p className="text-xs text-gray-500">{folderSongs.length} tracks</p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                        <div className="border-b border-white/5 my-6" />
+                        <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                          All Tracks
+                        </div>
+                      </div>
+                    )}
                     {renderSongList()}
                   </div>
                 </div>
@@ -658,9 +973,24 @@ export default function App() {
                             <div className="h-10 md:h-12 invisible" />
                           )}
                         </motion.div>
+                      ) : isLyricsLoading ? (
+                        <div className="flex flex-col items-center justify-center space-y-4">
+                           <RotateCcw className="w-12 h-12 text-blue-400 animate-spin opacity-50" />
+                           <p className="text-blue-400 text-lg font-bold italic animate-pulse">Loading lyrics...</p>
+                        </div>
                       ) : (
                         <div className="flex flex-col items-center justify-center h-full text-gray-500 italic gap-6 text-center">
-                          <p className="text-xl">{currentSong ? 'No lyrics available for this song.' : 'Select a song to see lyrics.'}</p>
+                          <Mic2 className="w-16 h-16 opacity-20 mb-2" />
+                          <div className="space-y-2">
+                            <p className="text-xl md:text-2xl font-medium">
+                              {currentSong ? 'No lyrics available for this song' : 'Select a song to see lyrics'}
+                            </p>
+                            {currentSong?.isDrive && !currentSong.lrcId && (
+                              <p className="text-sm not-italic opacity-60">
+                                Matching .lrc or .txt file not found in Google Drive folder.
+                              </p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </AnimatePresence>

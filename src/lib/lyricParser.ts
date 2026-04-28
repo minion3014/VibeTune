@@ -4,7 +4,9 @@ export interface LyricLine {
 }
 
 export function parseLRC(lrcContent: string): LyricLine[] {
-  const lines = lrcContent.split('\n');
+  // Remove BOM if present
+  const cleanContent = lrcContent.replace(/^\uFEFF/, '');
+  const lines = cleanContent.split('\n');
   const lyrics: LyricLine[] = [];
   
   // Matches [mm:ss.xx], [mm:ss:xx], [mm:ss]
@@ -20,7 +22,8 @@ export function parseLRC(lrcContent: string): LyricLine[] {
     while ((match = timeRegex.exec(line)) !== null) {
       const minutes = parseInt(match[1]);
       const seconds = parseInt(match[2]);
-      const milliseconds = match[3] ? parseInt(match[3]) : 0;
+      const millisecondsStr = match[3] || '0';
+      const milliseconds = parseInt(millisecondsStr);
       
       // Handle different millisecond formats (e.g. .5 vs .50 vs .500)
       let msFactor = 1;
@@ -32,7 +35,8 @@ export function parseLRC(lrcContent: string): LyricLine[] {
 
       const time = minutes * 60 + seconds + (milliseconds * msFactor);
       
-      if (text || line.includes(']')) { // Keep empty lines if they have a timestamp
+      // Keep line if it has text or is explicitly timed
+      if (text || line.trim().startsWith('[')) {
         lyrics.push({ time, text });
       }
     }
