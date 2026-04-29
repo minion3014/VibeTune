@@ -10,12 +10,12 @@ import {
   ListMusic,
   X,
   RotateCcw,
-  Shuffle,
+  Shuffle, 
   Repeat,
   Mic2,
   Cloud
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import * as mm from 'music-metadata-browser';
 import { parseLRC, LyricLine } from './lib/lyricParser';
 
@@ -60,6 +60,7 @@ export default function App() {
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const currentSong = songs[currentSongIndex] || null;
+  const dragControls = useDragControls();
 
   // Handle search interaction
   const handleSearchFocus = () => {
@@ -151,7 +152,8 @@ export default function App() {
         let artist = data.folder;
         try {
           const metadata = await mm.parseBlob(data.audio);
-          artist = metadata.common.composer || metadata.common.artist || data.folder;
+          const rawArtist = metadata.common.composer || metadata.common.artist || data.folder;
+          artist = Array.isArray(rawArtist) ? rawArtist[0] : rawArtist;
         } catch (e) {
           // Error parsing metadata
         }
@@ -198,23 +200,24 @@ export default function App() {
     });
     
     setSongs(allLoadedSongs);
+    setCurrentPath([]); // Start at root overview
+    setCurrentFolder(null);
     
     setFolders(prev => {
       const next = new Map();
       // Keep cloud folders
-      prev.forEach((songs, key) => {
-        if (songs.some(s => s.isDrive)) {
-          next.set(key, songs);
+      prev.forEach((val, key) => {
+        if (val.some(s => s.isDrive)) {
+          next.set(key, val);
         }
       });
       // Add new local folders
-      folderMap.forEach((songs, key) => {
-        next.set(key, songs);
+      folderMap.forEach((val, key) => {
+        next.set(key, val);
       });
       return next;
     });
-    setCurrentFolder(null);
-    
+
     if (allLoadedSongs.length > 0) {
       setCurrentSongIndex(0);
       setIsPlaying(false);
@@ -272,25 +275,30 @@ export default function App() {
       
       if (activeSource === 'cloud') {
         if (!isDriveFolder) return false;
-        // Simple cloud view for now
         return !currentFolder;
       }
       
       if (activeSource === 'local') {
         if (isDriveFolder) return false;
+        
         const currentPrefix = currentPath.join('/');
         
-        // If we have a path, hide the current folder/path itself from the list
-        if (name === currentPrefix) return false;
-        
-        // If we are at root level (rootFolderName), show only its direct children
-        // Match direct children only: name starts with prefix/ and has exactly one more segment
-        if (currentPrefix) {
-          return name.startsWith(currentPrefix + '/') && name.split('/').length === currentPath.length + 1;
+        // Items in visibleFolders should be direct CHILDREN of currentPrefix
+        if (currentPrefix === "") {
+          // At root level: show items with only one segment (the root folders)
+          return name.split('/').length === 1;
+        } else {
+          // Inside a folder: hide the current folder itself
+          if (name === currentPrefix) return false;
+          
+          // Show items that start with currentPrefix/ and have exactly one more segment
+          const prefixWithSlash = currentPrefix + '/';
+          if (name.startsWith(prefixWithSlash)) {
+            const remaining = name.substring(prefixWithSlash.length);
+            return !remaining.includes('/');
+          }
+          return false;
         }
-        
-        // Fallback for empty root or if some keys don't have the root prefix
-        return name.split('/').length === 1;
       }
       return true;
     }).sort();
@@ -332,10 +340,11 @@ export default function App() {
       setGoogleUser(driveUser);
       setIsGoogleLinked(true);
       
-      // If no local files and we found drive songs, or if we manually refreshed
       if (driveSongs.length > 0) {
         if (!activeSource || isManual) {
           setActiveSource('cloud');
+          setCurrentPath([]); // Start at root for cloud
+          setCurrentFolder(null);
         }
       }
       
@@ -356,7 +365,7 @@ export default function App() {
           ? ["Google Drive"]
           : pathParts;
         
-        foldersToAddTo.forEach(folderName => {
+        foldersToAddTo.forEach((folderName: string) => {
           if (!folderName) return;
           const folderSongs = newFolders.get(folderName) || [];
           newFolders.set(folderName, mergeSongs(folderSongs, [song]));
@@ -435,16 +444,13 @@ export default function App() {
   }, [currentSong?.id, currentSong?.lrcId]);
 
   const resetFilter = () => {
-    let filtered = allSongs;
-    if (activeSource === 'cloud') {
-      filtered = allSongs.filter(s => s.isDrive);
-      setCurrentPath([]);
-    } else if (activeSource === 'local') {
-      filtered = allSongs.filter(s => !s.isDrive);
-      if (rootFolderName) setCurrentPath([rootFolderName]);
-    }
-    setSongs(filtered);
+    setCurrentPath([]);
     setCurrentFolder(null);
+    if (activeSource === 'cloud') {
+      setSongs(allSongs.filter(s => s.isDrive));
+    } else {
+      setSongs(allSongs.filter(s => !s.isDrive));
+    }
   };
 
   const goBack = () => {
@@ -556,7 +562,7 @@ export default function App() {
   };
 
   const currentLyricIndex = useMemo(() => {
-    if (!currentSong || currentSong.lyrics.length === 0) return -1;
+    if (!currentSong || currentSong.lyrics.length === 0 || currentTime <= 0) return -1;
     return currentSong.lyrics.findIndex((line, i) => {
       const nextLine = currentSong.lyrics[i + 1];
       return currentTime >= line.time && (!nextLine || currentTime < nextLine.time);
@@ -585,7 +591,7 @@ export default function App() {
           
           <div className="mt-6 space-y-3 w-full max-w-[200px]">
             <button 
-              onClick={isGoogleLinked ? fetchGoogleSongs : handleGoogleConnect}
+              onClick={() => fetchGoogleSongs(true)}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-xl transition-all text-xs font-black uppercase tracking-wider"
             >
               <Cloud className="w-4 h-4" />
@@ -924,10 +930,12 @@ export default function App() {
               <motion.div 
                 key="mobile-library"
                 drag="y"
+                dragControls={dragControls}
+                dragListener={false}
                 dragConstraints={{ top: 0 }}
                 dragElastic={0.2}
                 onDragEnd={(_, info) => {
-                  if (info.offset.y > 150) setIsLibraryOpen(false);
+                  if (info.offset.y > 100) setIsLibraryOpen(false);
                 }}
                 initial={{ y: '100%' }}
                 animate={{ y: 0 }}
@@ -938,10 +946,13 @@ export default function App() {
                   stiffness: 180,
                   opacity: { duration: 0.15 } 
                 }}
-                className="md:hidden fixed bottom-0 left-0 right-0 h-[85vh] bg-[#0c0c0c] border-t border-white/10 z-[160] flex flex-col rounded-t-[40px] shadow-2xl overflow-hidden"
+                className="md:hidden fixed bottom-0 left-0 right-0 h-[85vh] bg-[#0c0c0c] border-t border-white/10 z-[160] flex flex-col rounded-t-[32px] shadow-2xl overflow-hidden"
               >
-                <div className="flex justify-center pt-3 pb-1">
-                  <div className="w-12 h-1.5 bg-white/10 rounded-full" />
+                <div 
+                  className="flex justify-center pt-3 pb-3 cursor-grab active:cursor-grabbing touch-none"
+                  onPointerDown={(e) => dragControls.start(e)}
+                >
+                  <div className="w-12 h-1.5 bg-white/20 rounded-full" />
                 </div>
 
                 <div className="pl-8 pr-4 py-6 flex items-center justify-between">

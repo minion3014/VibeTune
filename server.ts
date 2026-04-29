@@ -229,19 +229,50 @@ app.get("/api/drive/stream/:fileId", async (req, res) => {
       fields: "mimeType, size"
     });
 
-    // Stream the file content
-    const response = await googleDrive.files.get({
-      auth: oauth2Client,
-      fileId: req.params.fileId,
-      alt: "media"
-    }, { responseType: "stream" });
+    const fileSize = parseInt(fileInfo.data.size || "0");
+    const range = req.headers.range;
 
-    res.setHeader("Content-Type", fileInfo.data.mimeType || "audio/mpeg");
-    if (fileInfo.data.size) {
-      res.setHeader("Content-Length", fileInfo.data.size);
+    if (range && fileSize) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+
+      const response = await googleDrive.files.get({
+        auth: oauth2Client,
+        fileId: req.params.fileId,
+        alt: "media"
+      }, { 
+        responseType: "stream",
+        headers: {
+          Range: `bytes=${start}-${end}`
+        }
+      });
+
+      res.writeHead(206, {
+        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": chunksize,
+        "Content-Type": fileInfo.data.mimeType || "audio/mpeg",
+      });
+
+      (response.data as any).pipe(res);
+    } else {
+      // Stream the entire file if no range is requested
+      const response = await googleDrive.files.get({
+        auth: oauth2Client,
+        fileId: req.params.fileId,
+        alt: "media"
+      }, { responseType: "stream" });
+
+      res.setHeader("Content-Type", fileInfo.data.mimeType || "audio/mpeg");
+      res.setHeader("Accept-Ranges", "bytes");
+      if (fileSize) {
+        res.setHeader("Content-Length", fileSize);
+      }
+      
+      (response.data as any).pipe(res);
     }
-    
-    (response.data as any).pipe(res);
   } catch (error) {
     console.error("Error streaming file:", error);
     res.status(500).send("Error streaming file");
