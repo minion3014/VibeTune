@@ -13,11 +13,13 @@ import {
   Shuffle, 
   Repeat,
   Mic2,
-  Cloud
+  Cloud,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import * as mm from 'music-metadata-browser';
 import { parseLRC, LyricLine } from './lib/lyricParser';
+import { fetchLyricsFromLRCLib } from './services/lrcLibService';
 
 interface Song {
   id: string;
@@ -31,6 +33,8 @@ interface Song {
   hasLyrics?: boolean;
   folder?: string;
   path?: string[];
+  isLrcLibFetched?: boolean;
+  metadataParsed?: boolean;
 }
 
 export default function App() {
@@ -41,6 +45,7 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState<string[]>([]);
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isSearchingLyrics, setIsSearchingLyrics] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -53,7 +58,7 @@ export default function App() {
   const [googleUser, setGoogleUser] = useState<{ name: string; picture: string } | null>(null);
   const [isLoadingDrive, setIsLoadingDrive] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
-  const [activeSource, setActiveSource] = useState<'cloud' | 'local' | null>(null);
+  const [activeSource, setActiveSource] = useState<'cloud' | 'local' | null>('local');
   
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -149,16 +154,40 @@ export default function App() {
           }
         }
 
-        let artist = data.folder;
+        let artist = "Unknown Artist";
+        let songName = data.audio.name.substring(0, data.audio.name.lastIndexOf('.'));
+        
         try {
           const metadata = await mm.parseBlob(data.audio);
-          const rawArtist = metadata.common.composer || metadata.common.artist || data.folder;
-          artist = Array.isArray(rawArtist) ? rawArtist[0] : rawArtist;
+          
+          if (metadata.common.title) {
+            songName = metadata.common.title.trim();
+          }
+
+          // Robust artist extraction: check artist, artists array, albumartist, then composer
+          const potentialArtist = 
+            metadata.common.artist || 
+            (metadata.common.artists && metadata.common.artists.length > 0 ? metadata.common.artists.join(', ') : null) ||
+            metadata.common.albumartist ||
+            metadata.common.composer;
+            
+          if (potentialArtist) {
+            artist = Array.isArray(potentialArtist) ? (potentialArtist as any[]).join(', ') : String(potentialArtist).trim();
+          }
         } catch (e) {
-          // Error parsing metadata
+          console.error("Local metadata parsing failed for:", data.audio.name, e);
+          // Fallback to filename parsing if metadata fails
+          if (songName.includes(' - ')) {
+            const parts = songName.split(' - ');
+            if (parts.length >= 2) {
+              artist = parts[0].trim();
+              songName = parts.slice(1).join(' - ').trim();
+            }
+          } else if (data.folder && data.folder !== rootName) {
+            artist = data.folder;
+          }
         }
 
-        const songName = data.audio.name.substring(0, data.audio.name.lastIndexOf('.'));
         const song: Song = {
           id: `local-${data.audio.name}-${data.path.join('-')}`,
           name: songName,
@@ -168,7 +197,8 @@ export default function App() {
           cover: `https://picsum.photos/seed/${data.audio.name}/400/400`,
           isDrive: false,
           folder: data.folder,
-          path: data.path
+          path: data.path,
+          metadataParsed: true
         };
 
         allLoadedSongs.push(song);
@@ -248,6 +278,7 @@ export default function App() {
     if (isGoogleLinked) {
       setActiveSource('cloud');
       setCurrentFolder(null);
+      setCurrentPath([]);
       // Update songs list to show ALL cloud songs immediately
       setSongs(allSongs.filter(s => s.isDrive));
       fetchGoogleSongs(true); // Refresh on switch with manual flag
@@ -262,6 +293,7 @@ export default function App() {
     } else {
       setActiveSource('local');
       setCurrentFolder(null);
+      setCurrentPath(rootFolderName ? [rootFolderName] : []);
       // Update songs list to show ALL local songs immediately
       setSongs(allSongs.filter(s => !s.isDrive));
     }
@@ -304,6 +336,104 @@ export default function App() {
     }).sort();
   }, [folders, activeSource, currentPath, currentFolder]);
 
+  const handleFetchLyrics = async (song: Song) => {
+    if (isSearchingLyrics) return;
+    
+    // Ensure we have metadata before searching
+    let targetSong = song;
+    if (song.isDrive && !song.metadataParsed) {
+       const enriched = await enrichDriveSongMetadata(song);
+       if (enriched) targetSong = enriched;
+    }
+
+    setIsSearchingLyrics(true);
+    try {
+      const lrc = await fetchLyricsFromLRCLib(targetSong.name, targetSong.artist);
+      if (lrc) {
+        const parsed = parseLRC(lrc);
+        const updatedSong = { 
+          ...targetSong, 
+          lyrics: parsed, 
+          isLrcLibFetched: true, 
+          hasLyrics: true 
+        };
+        
+        setAllSongs(prev => prev.map(s => s.id === targetSong.id ? updatedSong : s));
+        setSongs(prev => prev.map(s => s.id === targetSong.id ? updatedSong : s));
+      } else {
+        const updatedSong = { ...targetSong, isLrcLibFetched: true, hasLyrics: false, lyrics: [] };
+        setAllSongs(prev => prev.map(s => s.id === targetSong.id ? updatedSong : s));
+        setSongs(prev => prev.map(s => s.id === targetSong.id ? updatedSong : s));
+      }
+    } catch (e) {
+      console.error("Error in handleFetchLyrics:", e);
+    } finally {
+      setIsSearchingLyrics(false);
+    }
+  };
+
+  const enrichDriveSongMetadata = async (song: Song): Promise<Song | null> => {
+    if (!song.isDrive || song.metadataParsed) return null;
+    
+    try {
+      // Increase range to 512KB for better tag detection
+      const response = await fetch(song.audioUrl, {
+        headers: { Range: 'bytes=0-512000' }
+      });
+      
+      if (!response.ok && response.status !== 206) return null;
+      
+      const blob = await response.blob();
+      const metadata = await mm.parseBlob(blob);
+      
+      let updatedName = song.name;
+      let updatedArtist = song.artist;
+      
+      if (metadata.common.title) {
+        updatedName = metadata.common.title.trim();
+      }
+      
+      const potentialArtist = 
+        metadata.common.artist || 
+        (metadata.common.artists && metadata.common.artists.length > 0 ? metadata.common.artists.join(', ') : null) ||
+        metadata.common.albumartist ||
+        metadata.common.composer;
+        
+      if (potentialArtist) {
+        updatedArtist = Array.isArray(potentialArtist) ? (potentialArtist as any[]).join(', ') : String(potentialArtist).trim();
+      }
+      
+      const updatedSong = { 
+        ...song, 
+        name: updatedName, 
+        artist: updatedArtist, 
+        metadataParsed: true 
+      };
+      
+      setAllSongs(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+      setSongs(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+      
+      return updatedSong;
+    } catch (e) {
+      console.error("Error enriching metadata for Drive song:", e);
+      // Mark as parsed anyway to avoid repeated failed attempts
+      const updatedSong = { ...song, metadataParsed: true };
+      setAllSongs(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+      setSongs(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+      return updatedSong;
+    }
+  };
+
+  useEffect(() => {
+    if (currentSong && currentSong.isDrive && !currentSong.metadataParsed) {
+      enrichDriveSongMetadata(currentSong);
+    }
+    
+    if (currentSong && currentSong.lyrics.length === 0 && !currentSong.isLrcLibFetched) {
+      handleFetchLyrics(currentSong);
+    }
+  }, [currentSongIndex, currentSong?.id]);
+
   const handleGoogleConnect = async () => {
     try {
       const resp = await fetch('/api/auth/google/url');
@@ -341,7 +471,7 @@ export default function App() {
       setIsGoogleLinked(true);
       
       if (driveSongs.length > 0) {
-        if (!activeSource || isManual) {
+        if (isManual) {
           setActiveSource('cloud');
           setCurrentPath([]); // Start at root for cloud
           setCurrentFolder(null);
@@ -378,8 +508,14 @@ export default function App() {
       setAllSongs(prev => mergeSongs(prev, songsWithDriveFlag));
       
       // Update current song view if we are on cloud or just loaded it
-      if (activeSource === 'cloud' || (!activeSource && driveSongs.length > 0)) {
-        setSongs(prev => mergeSongs(prev, songsWithDriveFlag));
+      if (activeSource === 'cloud' || (activeSource === 'local' && driveSongs.length > 0)) {
+        // Prepare songs but stay on current view source
+        setSongs(prev => {
+          if (activeSource === 'cloud') {
+             return mergeSongs(prev, songsWithDriveFlag);
+          }
+          return prev;
+        });
       }
       
       setFolders(newFolders);
@@ -1124,22 +1260,67 @@ export default function App() {
                             <div className="h-10 md:h-12 invisible" />
                           )}
                         </motion.div>
-                      ) : isLyricsLoading ? (
-                        <div className="flex flex-col items-center justify-center space-y-4">
-                           <RotateCcw className="w-12 h-12 text-blue-400 animate-spin opacity-50" />
-                           <p className="text-blue-400 text-lg font-bold italic animate-pulse">Loading lyrics...</p>
+                      ) : (isLyricsLoading || isSearchingLyrics) ? (
+                        <div className="flex flex-col items-center justify-center space-y-6">
+                           <div className="relative">
+                             <motion.div 
+                               className="w-16 h-16 border-4 border-blue-500/20 rounded-full"
+                               animate={{ scale: [1, 1.1, 1] }}
+                               transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                             />
+                             <motion.div 
+                               className="absolute inset-0 border-4 border-t-blue-500 rounded-full"
+                               animate={{ rotate: 360 }}
+                               transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                             />
+                           </div>
+                           <div className="text-center space-y-2">
+                             <p className="text-blue-400 text-lg font-bold italic tracking-wider uppercase">
+                               {isSearchingLyrics ? 'Syncing from LRCLIB' : 'Reading Metadata'}
+                             </p>
+                             <div className="flex gap-1 justify-center">
+                               {[0, 1, 2].map(i => (
+                                 <motion.div 
+                                   key={i}
+                                   className="w-1.5 h-1.5 bg-blue-500 rounded-full"
+                                   animate={{ opacity: [0.3, 1, 0.3] }}
+                                   transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                                 />
+                               ))}
+                             </div>
+                           </div>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center justify-center h-full text-gray-500 italic gap-6 text-center">
                           <Mic2 className="w-16 h-16 opacity-20 mb-2" />
-                          <div className="space-y-2">
-                            <p className="text-xl md:text-2xl font-medium">
-                              {currentSong ? 'No lyrics available for this song' : 'Select a song to see lyrics'}
+                          <div className="space-y-4 px-6">
+                            <p className="text-xl md:text-2xl font-medium text-gray-400">
+                              {currentSong ? 'Lyrics not found' : 'Select a track'}
                             </p>
-                            {currentSong?.isDrive && !currentSong.lrcId && (
-                              <p className="text-sm not-italic opacity-60">
-                                Matching .lrc or .txt file not found in Google Drive folder.
-                              </p>
+                            {currentSong && (
+                              <div className="space-y-6">
+                                <div className="space-y-1">
+                                  <p className="text-sm font-bold text-gray-300 not-italic uppercase tracking-widest">{currentSong.name}</p>
+                                  <p className="text-xs text-gray-500 not-italic">{currentSong.artist}</p>
+                                </div>
+                                <button
+                                  onClick={() => handleFetchLyrics(currentSong)}
+                                  disabled={isSearchingLyrics}
+                                  className="mx-auto flex items-center gap-2 px-6 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-full transition-all text-[10px] font-black uppercase tracking-widest border border-blue-500/30 disabled:opacity-50"
+                                >
+                                  {isSearchingLyrics ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      Searching...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      Retry Search
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             )}
                           </div>
                         </div>

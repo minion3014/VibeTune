@@ -170,10 +170,22 @@ app.get("/api/drive/songs", async (req, res) => {
     const songs = [];
     for (const [key, data] of songMap.entries()) {
       if (data.audio) {
+        let artist = data.folder === "Root" ? "Common" : data.folder; // Use folder as early fallback
+        let songName = data.name;
+
+        // Try to parse Artist - Title from filename
+        if (songName.includes(' - ')) {
+          const parts = songName.split(' - ');
+          if (parts.length >= 2) {
+            artist = parts[0].trim();
+            songName = parts.slice(1).join(' - ').trim();
+          }
+        }
+
         songs.push({
           id: data.audio.id,
-          name: data.name,
-          artist: data.folder === "Root" ? "Google Drive" : data.folder,
+          name: songName,
+          artist: artist,
           audioUrl: `/api/drive/stream/${data.audio.id}`,
           lrcId: data.lrc?.id,
           hasLyrics: !!data.lrc,
@@ -189,6 +201,48 @@ app.get("/api/drive/songs", async (req, res) => {
     console.error("Error listing Drive files:", error);
     const message = error.response?.data?.error?.message || error.message || "Failed to fetch songs";
     res.status(500).json({ error: message });
+  }
+});
+
+app.get("/api/lyrics/search", async (req, res) => {
+  const { track_name, artist_name, duration } = req.query;
+  
+  if (!track_name || !artist_name) {
+    return res.status(400).json({ error: "track_name and artist_name are required" });
+  }
+
+  try {
+    const query = new URLSearchParams({
+      track_name: track_name as string,
+      artist_name: artist_name as string,
+    });
+    if (duration) query.append('duration', Math.round(Number(duration)).toString());
+
+    // Try to get an exact match first
+    const getUrl = `https://lrclib.net/api/get?${query.toString()}`;
+    console.log(`Proxying LRCLIB GET: ${getUrl}`);
+    const response = await fetch(getUrl);
+    
+    if (response.ok) {
+      const data = await response.json();
+      return res.json(data);
+    }
+
+    // If exact match fails, try search
+    const searchUrl = `https://lrclib.net/api/search?${query.toString()}`;
+    console.log(`Proxying LRCLIB SEARCH: ${searchUrl}`);
+    const searchResponse = await fetch(searchUrl);
+    if (searchResponse.ok) {
+      const results = await searchResponse.json();
+      if (Array.isArray(results) && results.length > 0) {
+        return res.json(results[0]);
+      }
+    }
+
+    res.status(404).json({ error: "Lyrics not found" });
+  } catch (error) {
+    console.error('Error proxying to LRCLib:', error);
+    res.status(500).json({ error: "Failed to fetch from LRCLIB" });
   }
 });
 
