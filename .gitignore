@@ -1,39 +1,27 @@
-# Dependencies
+# deps
 node_modules
-/.pnp
-.pnp.js
 
-# Testing
-/coverage
+# env
+.env*
 
-# Production
-/dist
+# build
+dist
+build
 
-# Misc
-.DS_Store
-*.pem
-
-# Debug
+# logs
+logs
+*.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Local env files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# cache
+.cache
+.tmp
+*.tsbuildinfo
 
-# Vite
-vite.config.ts.timestamp-*
+# system
+.DS_Store
 
-# Editor
+# editor
 .vscode/*
 !.vscode/extensions.json
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+.idea
