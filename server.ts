@@ -32,6 +32,7 @@ const getRedirectUri = (req: express.Request) => {
 // API Routes
 app.get("/api/auth/google/url", (req, res) => {
   const redirectUri = getRedirectUri(req);
+  console.log("Generating Google Auth URL with redirect_uri:", redirectUri);
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
     scope: [
