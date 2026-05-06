@@ -23,9 +23,14 @@ const googleDrive = google.drive({ version: "v3" });
 const getRedirectUri = (req: express.Request) => {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   
-  // Construct from request if not in env
-  const protocol = req.headers['x-forwarded-proto'] || 'http';
   const host = req.headers['host'];
+  // Hardcoded fallback for your specific Render app if env is not set
+  if (host === 'vibetune-4pw7.onrender.com') {
+    return `https://vibetune-4pw7.onrender.com/auth/callback`;
+  }
+
+  // Construct from request if not in env and not our specific host
+  const protocol = req.headers['x-forwarded-proto'] || 'http';
   return `${protocol}://${host}/auth/callback`;
 };
 
