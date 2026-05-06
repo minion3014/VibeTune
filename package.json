@@ -10,6 +10,9 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "buffer": "^6.0.3",
