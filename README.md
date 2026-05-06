@@ -1,20 +1,50 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# VibeTune 🎵
 
-# Run and deploy your AI Studio app
+Music player (React + Express) hỗ trợ:
+- Google Drive
+- Local files
+- Lyrics sync
 
-This contains everything you need to run your app locally.
+## Demo
+https://vibetune.onrender.com
 
-View your app in AI Studio: https://ai.studio/apps/f905b2f8-9cbc-47d8-b486-3622a0e78db2
+## Tech stack
+- React + TypeScript
+- Express + Node.js
+- Tailwind CSS
+- music-metadata-browser (Metadata parsing)
 
-## Run Locally
+## Installation
 
-**Prerequisites:**  Node.js
+### Cài đặt dependencies
+```bash
+npm install
+```
 
+### Chạy Development
+```bash
+npm run dev
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### Build & Chạy Production
+```bash
+npm run build
+npm start
+```
+
+## Environment Variables
+Tạo file `.env` ở thư mục gốc:
+```env
+GOOGLE_CLIENT_ID=your_client_id
+GOOGLE_CLIENT_SECRET=your_client_secret
+PORT=3000
+```
+
+## Features
+- Play music từ Google Drive trực tiếp (không cần tải về)
+- Seek mượt mà với hỗ trợ Range Request (HTTP 206)
+- Tự động lấy Lyrics từ LRCLIB dựa trên metadata của file
+- Hỗ trợ chọn Folder nhạc địa phương và đọc tag Title/Artists từ file MP3
+
+## Screenshots
+![App Screenshot](https://raw.githubusercontent.com/minion3014/vibetune/main/screenshot.png) (Ví dụ)
