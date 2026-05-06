@@ -46,3 +46,5 @@ PORT=3000
 - Tự động lấy Lyrics từ LRCLIB dựa trên metadata của file
 - Hỗ trợ chọn Folder nhạc địa phương và đọc tag Title/Artists từ file MP3
 
+## Screenshots
+![VibeTune Player Screenshot](./app_screenshot.png)
