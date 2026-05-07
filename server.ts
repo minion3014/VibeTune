@@ -25,8 +25,8 @@ const getRedirectUri = (req: express.Request) => {
   
   const host = req.headers['host'];
   // Hardcoded fallback for your specific Render app if env is not set
-  if (host === 'vibetune-4pw7.onrender.com') {
-    return `https://vibetune-4pw7.onrender.com/auth/callback`;
+  if (host === 'vibetune-8hdi.onrender.com') {
+    return `https://vibetune-8hdi.onrender.com/auth/callback`;
   }
 
   // Construct from request if not in env and not our specific host

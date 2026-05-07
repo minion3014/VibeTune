@@ -6,7 +6,7 @@ Music player (React + Express) hỗ trợ:
 - Lyrics sync
 
 ## Demo
-https://vibetune-4pw7.onrender.com
+https://vibetune-8hdi.onrender.com
 
 ## Tech stack
 - React + TypeScript
