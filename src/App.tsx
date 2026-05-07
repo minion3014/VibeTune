@@ -127,12 +127,13 @@ export default function App() {
       
       const fileNameNoExt = file.name.substring(0, lastDotIndex).toLowerCase();
       const ext = file.name.substring(lastDotIndex + 1).toLowerCase();
+      const supportedExtensions = ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'alac', 'aif', 'aiff'];
 
       const immediateParent = parentFolders[parentFolders.length - 1] || rootName;
       const folderKey = parentFolders.join('/');
       const uniqueKey = `${folderKey}:${fileNameNoExt}`;
 
-      if (['mp3', 'wav', 'm4a', 'flac', 'ogg'].includes(ext)) {
+      if (supportedExtensions.includes(ext)) {
         const current = songMap.get(uniqueKey) || { folder: immediateParent, path: parentFolders };
         songMap.set(uniqueKey, { ...current, audio: file });
       } else if (ext === 'txt' || ext === 'lrc') {
@@ -140,6 +141,8 @@ export default function App() {
         songMap.set(uniqueKey, { ...current, lrc: file });
       }
     }
+
+    console.log(`Found ${songMap.size} potential songs after filtering extensions.`);
 
     const allLoadedSongs: Song[] = [];
     for (const [name, data] of songMap.entries()) {
@@ -150,21 +153,22 @@ export default function App() {
             const lrcText = await data.lrc.text();
             lyrics = parseLRC(lrcText);
           } catch (e) {
-            // Error parsing lyrics
+            console.error("Error parsing lyrics for:", data.audio.name, e);
           }
         }
 
         let artist = "Unknown Artist";
         let songName = data.audio.name.substring(0, data.audio.name.lastIndexOf('.'));
+        let metadataParsed = false;
         
         try {
+          // Parse metadata but don't let it block the whole list if it fails
           const metadata = await mm.parseBlob(data.audio);
           
           if (metadata.common.title) {
             songName = metadata.common.title.trim();
           }
 
-          // Robust artist extraction: check artist, artists array, albumartist, then composer
           const potentialArtist = 
             metadata.common.artist || 
             (metadata.common.artists && metadata.common.artists.length > 0 ? metadata.common.artists.join(', ') : null) ||
@@ -174,9 +178,10 @@ export default function App() {
           if (potentialArtist) {
             artist = Array.isArray(potentialArtist) ? (potentialArtist as any[]).join(', ') : String(potentialArtist).trim();
           }
+          metadataParsed = true;
         } catch (e) {
-          console.error("Local metadata parsing failed for:", data.audio.name, e);
-          // Fallback to filename parsing if metadata fails
+          console.warn("Could not parse metadata for:", data.audio.name, "Using filename instead.");
+          // Fallback parsing from filename "Artist - Title"
           if (songName.includes(' - ')) {
             const parts = songName.split(' - ');
             if (parts.length >= 2) {
@@ -198,7 +203,7 @@ export default function App() {
           isDrive: false,
           folder: data.folder,
           path: data.path,
-          metadataParsed: true
+          metadataParsed
         };
 
         allLoadedSongs.push(song);
@@ -402,7 +407,8 @@ export default function App() {
       // 2. Parse metadata if not yet parsed
       if (!song.metadataParsed) {
         const response = await fetch(song.audioUrl, {
-          headers: { Range: 'bytes=0-512000' }
+          // Increase to 1MB for large FLAC files to ensure metadata is captured
+          headers: { Range: 'bytes=0-1048576' }
         });
         
         if (response.ok || response.status === 206) {
@@ -1463,6 +1469,7 @@ export default function App() {
         ref={fileInputRef}
         onChange={handleFiles}
         className="hidden"
+        accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.lrc,.txt"
         // @ts-ignore
         webkitdirectory=""
         directory=""

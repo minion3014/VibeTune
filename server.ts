@@ -163,8 +163,9 @@ app.get("/api/drive/songs", async (req, res) => {
       const folderKey = removeAccents((file.folderPath.join('/') || "Root").toLowerCase().replace(/\s+/g, ' '));
 
       const fullKey = `${folderKey}/${nameWithoutExt}`;
+      const supportedExtensions = ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'alac', 'aif', 'aiff'];
 
-      if (['mp3', 'wav', 'm4a', 'flac', 'ogg'].includes(ext)) {
+      if (supportedExtensions.includes(ext)) {
         const current = songMap.get(fullKey) || { folder: file.folderPath.join('/') || "Root" };
         songMap.set(fullKey, { ...current, audio: file, name: baseName.normalize('NFC') });
       } else if (ext === 'txt' || ext === 'lrc') {
@@ -309,11 +310,21 @@ app.get("/api/drive/stream/:fileId", async (req, res) => {
         }
       });
 
+      let contentType = fileInfo.data.mimeType || "audio/mpeg";
+      // Manually fix mimeType for flac if it's generic or missing
+      if (contentType === 'application/octet-stream') {
+        const ext = fileInfo.data.name?.substring(fileInfo.data.name.lastIndexOf('.') + 1).toLowerCase();
+        if (ext === 'flac') contentType = 'audio/flac';
+        else if (ext === 'wav') contentType = 'audio/wav';
+        else if (ext === 'ogg') contentType = 'audio/ogg';
+        else if (ext === 'm4a') contentType = 'audio/mp4';
+      }
+
       res.writeHead(206, {
         "Content-Range": `bytes ${start}-${end}/${fileSize}`,
         "Accept-Ranges": "bytes",
         "Content-Length": chunksize,
-        "Content-Type": fileInfo.data.mimeType || "audio/mpeg",
+        "Content-Type": contentType,
       });
 
       (response.data as any).pipe(res);
@@ -325,7 +336,16 @@ app.get("/api/drive/stream/:fileId", async (req, res) => {
         alt: "media"
       }, { responseType: "stream" });
 
-      res.setHeader("Content-Type", fileInfo.data.mimeType || "audio/mpeg");
+      let contentType = fileInfo.data.mimeType || "audio/mpeg";
+      if (contentType === 'application/octet-stream') {
+        const ext = fileInfo.data.name?.substring(fileInfo.data.name.lastIndexOf('.') + 1).toLowerCase();
+        if (ext === 'flac') contentType = 'audio/flac';
+        else if (ext === 'wav') contentType = 'audio/wav';
+        else if (ext === 'ogg') contentType = 'audio/ogg';
+        else if (ext === 'm4a') contentType = 'audio/mp4';
+      }
+
+      res.setHeader("Content-Type", contentType);
       res.setHeader("Accept-Ranges", "bytes");
       if (fileSize) {
         res.setHeader("Content-Length", fileSize);
