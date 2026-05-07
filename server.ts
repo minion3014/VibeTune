@@ -112,7 +112,7 @@ app.get("/api/drive/songs", async (req, res) => {
       // User info failed, not critical
     }
 
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || "root";
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || "1kc0rdWpjuH4rHI3xcbFt_q0fMTzE9djB";
     
     // Recursive function to fetch files from a folder and its subfolders with pagination
     async function fetchFilesRecursively(fid: string, folderNamePath: string[] = []): Promise<any[]> {
