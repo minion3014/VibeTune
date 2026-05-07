@@ -336,14 +336,19 @@ export default function App() {
     }).sort();
   }, [folders, activeSource, currentPath, currentFolder]);
 
-  const handleFetchLyrics = async (song: Song) => {
+  const handleFetchLyrics = async (song: Song, force = false) => {
     if (isSearchingLyrics) return;
+    
+    // Prioritize existing lyrics unless forced (retry)
+    if (!force && song.lyrics.length > 0) return;
     
     // Ensure we have metadata before searching
     let targetSong = song;
     if (song.isDrive && !song.metadataParsed) {
        const enriched = await enrichDriveSongMetadata(song);
        if (enriched) targetSong = enriched;
+       // If enrichment loaded lyrics from Drive, and we are not forcing, stop here
+       if (!force && targetSong.lyrics.length > 0) return;
     }
 
     setIsSearchingLyrics(true);
@@ -373,41 +378,61 @@ export default function App() {
   };
 
   const enrichDriveSongMetadata = async (song: Song): Promise<Song | null> => {
-    if (!song.isDrive || song.metadataParsed) return null;
+    if (!song.isDrive || (song.metadataParsed && song.lyrics.length > 0)) return null;
     
+    let updatedLyrics = song.lyrics;
+    let updatedName = song.name;
+    let updatedArtist = song.artist;
+    let metadataParsedSuccessfully = song.metadataParsed;
+
     try {
-      // Increase range to 512KB for better tag detection
-      const response = await fetch(song.audioUrl, {
-        headers: { Range: 'bytes=0-512000' }
-      });
-      
-      if (!response.ok && response.status !== 206) return null;
-      
-      const blob = await response.blob();
-      const metadata = await mm.parseBlob(blob);
-      
-      let updatedName = song.name;
-      let updatedArtist = song.artist;
-      
-      if (metadata.common.title) {
-        updatedName = metadata.common.title.trim();
+      // 1. Fetch lyrics content if lrcId is present and we don't have lyrics yet
+      if (song.lrcId && song.lyrics.length === 0) {
+        try {
+          const lrcResp = await fetch(`/api/drive/lyrics/${song.lrcId}`);
+          if (lrcResp.ok) {
+            const lrcText = await lrcResp.text();
+            updatedLyrics = parseLRC(lrcText);
+          }
+        } catch (lrcError) {
+          console.error("Error fetching lyrics from Drive:", lrcError);
+        }
       }
-      
-      const potentialArtist = 
-        metadata.common.artist || 
-        (metadata.common.artists && metadata.common.artists.length > 0 ? metadata.common.artists.join(', ') : null) ||
-        metadata.common.albumartist ||
-        metadata.common.composer;
+
+      // 2. Parse metadata if not yet parsed
+      if (!song.metadataParsed) {
+        const response = await fetch(song.audioUrl, {
+          headers: { Range: 'bytes=0-512000' }
+        });
         
-      if (potentialArtist) {
-        updatedArtist = Array.isArray(potentialArtist) ? (potentialArtist as any[]).join(', ') : String(potentialArtist).trim();
+        if (response.ok || response.status === 206) {
+          const blob = await response.blob();
+          const metadata = await mm.parseBlob(blob);
+          
+          if (metadata.common.title) {
+            updatedName = metadata.common.title.trim();
+          }
+          
+          const potentialArtist = 
+            metadata.common.artist || 
+            (metadata.common.artists && metadata.common.artists.length > 0 ? metadata.common.artists.join(', ') : null) ||
+            metadata.common.albumartist ||
+            metadata.common.composer;
+            
+          if (potentialArtist) {
+            updatedArtist = Array.isArray(potentialArtist) ? (potentialArtist as any[]).join(', ') : String(potentialArtist).trim();
+          }
+          metadataParsedSuccessfully = true;
+        }
       }
       
       const updatedSong = { 
         ...song, 
         name: updatedName, 
         artist: updatedArtist, 
-        metadataParsed: true 
+        lyrics: updatedLyrics,
+        metadataParsed: metadataParsedSuccessfully,
+        hasLyrics: updatedLyrics.length > 0 || song.hasLyrics
       };
       
       setAllSongs(prev => prev.map(s => s.id === song.id ? updatedSong : s));
@@ -415,8 +440,8 @@ export default function App() {
       
       return updatedSong;
     } catch (e) {
-      console.error("Error enriching metadata for Drive song:", e);
-      // Mark as parsed anyway to avoid repeated failed attempts
+      console.error("Error enriching metadata/lyrics for Drive song:", e);
+      // Mark as parsed to avoid infinite loop
       const updatedSong = { ...song, metadataParsed: true };
       setAllSongs(prev => prev.map(s => s.id === song.id ? updatedSong : s));
       setSongs(prev => prev.map(s => s.id === song.id ? updatedSong : s));
@@ -1304,7 +1329,7 @@ export default function App() {
                                   <p className="text-xs text-gray-500 not-italic">{currentSong.artist}</p>
                                 </div>
                                 <button
-                                  onClick={() => handleFetchLyrics(currentSong)}
+                                  onClick={() => handleFetchLyrics(currentSong, true)}
                                   disabled={isSearchingLyrics}
                                   className="mx-auto flex items-center gap-2 px-6 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-full transition-all text-[10px] font-black uppercase tracking-widest border border-blue-500/30 disabled:opacity-50"
                                 >
