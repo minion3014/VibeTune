@@ -6,7 +6,7 @@ Music player (React + Express) hỗ trợ:
 - Lyrics sync
 
 ## Demo
-https://vibetune.onrender.com
+https://vibetune-4pw7.onrender.com
 
 ## Tech stack
 - React + TypeScript
@@ -37,14 +37,8 @@ Tạo file `.env` ở thư mục gốc (hoặc config trên Render):
 ```env
 GOOGLE_CLIENT_ID=your_client_id
 GOOGLE_CLIENT_SECRET=your_client_secret
-PORT=3000
 NODE_ENV=production
 ```
-
-### Google OAuth Setup
-Trong Google Cloud Console, bạn CẦN thêm các URL sau vào **Authorized redirect URIs**:
-- `http://localhost:3000/auth/callback` (cho local)
-- `https://vibetune-hywq.onrender.com/auth/callback` (cho Render)
 
 ## Features
 - Play music từ Google Drive trực tiếp (không cần tải về)
