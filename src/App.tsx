@@ -14,7 +14,10 @@ import {
   Repeat,
   Mic2,
   Cloud,
-  Loader2
+  Loader2,
+  Volume2,
+  Volume1,
+  VolumeX
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import * as mm from 'music-metadata-browser';
@@ -58,7 +61,10 @@ export default function App() {
   const [googleUser, setGoogleUser] = useState<{ name: string; picture: string } | null>(null);
   const [isLoadingDrive, setIsLoadingDrive] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
-  const [activeSource, setActiveSource] = useState<'cloud' | 'local' | null>('local');
+  const [activeSource, setActiveSource] = useState<'cloud' | 'local' | null>(null);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [previousVolume, setPreviousVolume] = useState(1);
   
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -234,7 +240,7 @@ export default function App() {
       return [...filtered, ...allLoadedSongs];
     });
     
-    setSongs(allLoadedSongs);
+    setSongs([]);
     setCurrentPath([]); // Start at root overview
     setCurrentFolder(null);
     
@@ -250,6 +256,8 @@ export default function App() {
       folderMap.forEach((val, key) => {
         next.set(key, val);
       });
+      // Add global All Local Songs virtual folder
+      next.set("All Local Songs", allLoadedSongs);
       return next;
     });
 
@@ -267,14 +275,35 @@ export default function App() {
   };
 
   const selectFolder = (folderKey: string) => {
-    const folderSongs = folders.get(folderKey) || [];
-    setSongs(folderSongs);
-    setCurrentFolder(folderKey.split('/').pop() || folderKey);
+    let folderSongs: Song[] = [];
     
     if (activeSource === 'local') {
-      setCurrentPath(folderKey.split('/'));
+      if (folderKey === "All Local Songs") {
+        folderSongs = allSongs.filter(s => !s.isDrive);
+        setCurrentPath([]);
+        setCurrentFolder("All Songs");
+      } else if (folderKey.endsWith(' (All Songs)')) {
+        const actualPath = folderKey.replace(' (All Songs)', '');
+        folderSongs = allSongs.filter(s => !s.isDrive && (s.path?.join('/') === actualPath || s.path?.join('/').startsWith(actualPath + '/')));
+        setCurrentPath(actualPath.split('/'));
+        setCurrentFolder(actualPath.split('/').pop() + " (All Songs)");
+      } else {
+        folderSongs = folders.get(folderKey) || [];
+        const pathSegments = folderKey.split('/');
+        setCurrentPath(pathSegments);
+        setCurrentFolder(pathSegments[pathSegments.length - 1]);
+      }
+    } else {
+      if (folderKey === "All Drive Songs") {
+        folderSongs = allSongs.filter(s => s.isDrive);
+        setCurrentFolder("All Songs");
+      } else {
+        folderSongs = folders.get(folderKey) || [];
+        setCurrentFolder(folderKey.split('/').pop() || folderKey);
+      }
     }
 
+    setSongs(folderSongs);
     setSearchQuery('');
     setShowSearchSuggestions(false);
   };
@@ -284,8 +313,8 @@ export default function App() {
       setActiveSource('cloud');
       setCurrentFolder(null);
       setCurrentPath([]);
-      // Update songs list to show ALL cloud songs immediately
-      setSongs(allSongs.filter(s => s.isDrive));
+      // Update songs list to show nothing until a folder is selected
+      setSongs([]);
       fetchGoogleSongs(true); // Refresh on switch with manual flag
     } else {
       handleGoogleConnect();
@@ -299,46 +328,72 @@ export default function App() {
       setActiveSource('local');
       setCurrentFolder(null);
       setCurrentPath(rootFolderName ? [rootFolderName] : []);
-      // Update songs list to show ALL local songs immediately
-      setSongs(allSongs.filter(s => !s.isDrive));
+      // Update songs list to show nothing until a folder is selected
+      setSongs([]);
     }
   };
 
   const visibleFolders = useMemo(() => {
     const folderKeys = Array.from(folders.keys());
-    return folderKeys.filter(name => {
-      const folderSongs = folders.get(name) || [];
-      const isDriveFolder = folderSongs.some(s => s.isDrive);
-      
-      if (activeSource === 'cloud') {
-        if (!isDriveFolder) return false;
-        return !currentFolder;
-      }
-      
-      if (activeSource === 'local') {
-        if (isDriveFolder) return false;
+    
+    if (activeSource === 'cloud') {
+      const results = folderKeys.filter(name => {
+        const folderSongs = folders.get(name) || [];
+        return folderSongs.some(s => s.isDrive) && !currentFolder;
+      });
+      if (!currentFolder) results.unshift("All Drive Songs");
+      return results.sort();
+    }
+    
+    if (activeSource === 'local') {
+      const currentPrefix = currentPath.join('/');
+      let results: string[] = [];
+
+      if (currentPrefix === "") {
+        // At root level
+        results.push("All Local Songs");
         
-        const currentPrefix = currentPath.join('/');
-        
-        // Items in visibleFolders should be direct CHILDREN of currentPrefix
-        if (currentPrefix === "") {
-          // At root level: show items with only one segment (the root folders)
-          return name.split('/').length === 1;
-        } else {
-          // Inside a folder: hide the current folder itself
-          if (name === currentPrefix) return false;
-          
-          // Show items that start with currentPrefix/ and have exactly one more segment
+        const rootSegments = new Set<string>();
+        folderKeys.forEach(name => {
+          if (name === "All Local Songs") return;
+          const segments = name.split('/');
+          if (segments.length >= 1) rootSegments.add(segments[0]);
+        });
+
+        rootSegments.forEach(root => {
+          // Flatten: show direct children immediately
+          folderKeys.forEach(name => {
+            if (name.startsWith(root + '/') && name.split('/').length === 2) {
+              results.push(name);
+            }
+          });
+        });
+      } else {
+        // Inside a folder
+        const directChildren = folderKeys.filter(name => {
+          if (name === "All Local Songs" || name === currentPrefix) return false;
           const prefixWithSlash = currentPrefix + '/';
           if (name.startsWith(prefixWithSlash)) {
             const remaining = name.substring(prefixWithSlash.length);
             return !remaining.includes('/');
           }
           return false;
-        }
+        });
+        
+        results = [...directChildren];
       }
-      return true;
-    }).sort();
+      
+      const unique = Array.from(new Set(results));
+      return unique.sort((a, b) => {
+        const isVirtualA = a.includes('All Songs') || a === "All Local Songs";
+        const isVirtualB = b.includes('All Songs') || b === "All Local Songs";
+        if (isVirtualA && !isVirtualB) return -1;
+        if (!isVirtualA && isVirtualB) return 1;
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+      });
+    }
+    
+    return [];
   }, [folders, activeSource, currentPath, currentFolder]);
 
   const handleFetchLyrics = async (song: Song, force = false) => {
@@ -542,7 +597,7 @@ export default function App() {
       if (activeSource === 'cloud' || (activeSource === 'local' && driveSongs.length > 0)) {
         // Prepare songs but stay on current view source
         setSongs(prev => {
-          if (activeSource === 'cloud') {
+          if (activeSource === 'cloud' && currentFolder) {
              return mergeSongs(prev, songsWithDriveFlag);
           }
           return prev;
@@ -613,22 +668,23 @@ export default function App() {
   const resetFilter = () => {
     setCurrentPath([]);
     setCurrentFolder(null);
-    if (activeSource === 'cloud') {
-      setSongs(allSongs.filter(s => s.isDrive));
-    } else {
-      setSongs(allSongs.filter(s => !s.isDrive));
-    }
+    setSearchQuery('');
+    setSongs([]);
+    setFilteredSongsDisplay([]);
   };
 
   const goBack = () => {
-    if (activeSource === 'local' && currentPath.length > 1) {
-      const newPath = currentPath.slice(0, -1);
-      setCurrentPath(newPath);
-      const folderKey = newPath.join('/');
-      // When going back, show all songs in this parent folder (from all its children too)
-      const folderSongs = allSongs.filter(s => !s.isDrive && s.path?.join('/').startsWith(folderKey));
-      setSongs(folderSongs);
-      setCurrentFolder(newPath.length > 1 ? newPath[newPath.length - 1] : null);
+    if (activeSource === 'local' && currentPath.length > 0) {
+      if (currentPath.length === 1) {
+        resetFilter();
+      } else {
+        const newPath = currentPath.slice(0, -1);
+        const folderKey = newPath.join('/');
+        const folderSongs = folders.get(folderKey) || [];
+        setSongs(folderSongs);
+        setCurrentPath(newPath);
+        setCurrentFolder(newPath[newPath.length - 1]);
+      }
     } else {
       resetFilter();
     }
@@ -653,6 +709,29 @@ export default function App() {
         // Playback error
       }
     }
+  };
+
+  // Volume sync
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = isMuted ? 0 : volume;
+    }
+  }, [volume, isMuted]);
+
+  const toggleMute = () => {
+    if (isMuted) {
+      setVolume(previousVolume);
+      setIsMuted(false);
+    } else {
+      setPreviousVolume(volume);
+      setIsMuted(true);
+    }
+  };
+
+  const handleVolumeChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const newVolume = parseFloat(e.target.value);
+    setVolume(newVolume);
+    if (newVolume > 0) setIsMuted(false);
   };
 
   // Playback logic
@@ -750,6 +829,7 @@ export default function App() {
   };
 
   const renderSongList = () => {
+    if (!currentFolder && activeSource) return null;
     if (filteredSongsDisplay.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-6 bg-white/5 border border-dashed border-white/10 rounded-2xl mx-1">
@@ -782,6 +862,7 @@ export default function App() {
     return filteredSongsDisplay.map((song) => (
       <button
         key={song.id}
+        data-active-song={currentSong?.id === song.id}
         onClick={() => {
           const index = songs.indexOf(song);
           if (index === currentSongIndex) {
@@ -831,6 +912,37 @@ export default function App() {
       </button>
     ));
   };
+
+  // Auto-scroll to active song in the menu/sidebar
+  useEffect(() => {
+    if (isLibraryOpen && currentSong) {
+      // Small timeout to allow the folder switch or library opening animations to complete
+      const timer = setTimeout(() => {
+        const activeElements = document.querySelectorAll(`[data-active-song="true"]`);
+        activeElements.forEach(el => {
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [currentSong?.id, songs, isLibraryOpen]);
+
+  // Auto-navigate to playing song's location if it's not in the current list
+  useEffect(() => {
+    if (activeSource && currentSong && !searchQuery) {
+      const isInCurrentList = songs.some(s => s.id === currentSong.id);
+      if (!isInCurrentList) {
+        // If the song is from the same source as active, switch folder to show it
+        if (currentSong.isDrive && activeSource === 'cloud') {
+          const folderName = currentSong.folder || "All Drive Songs";
+          if (folders.has(folderName)) selectFolder(folderName);
+        } else if (!currentSong.isDrive && activeSource === 'local' && currentSong.path) {
+          const folderKey = currentSong.path.join('/');
+          if (folders.has(folderKey)) selectFolder(folderKey);
+        }
+      }
+    }
+  }, [currentSong?.id]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1018,16 +1130,18 @@ export default function App() {
               <div className="flex-1 overflow-hidden flex flex-col p-2 pt-4">
                 {currentFolder && (
                   <div className="mx-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center gap-3 mb-4">
-                    {songs.some(s => s.isDrive) ? (
-                      <Cloud className="w-4 h-4 text-blue-400" />
-                    ) : (
-                      <FolderOpen className="w-4 h-4 text-blue-400" />
-                    )}
+                    <button 
+                      onClick={goBack} 
+                      className="p-1.5 bg-blue-500/20 hover:bg-blue-500/30 rounded-lg transition-colors"
+                      title="Go Back"
+                    >
+                      <SkipBack className="w-3.5 h-3.5 text-blue-400" />
+                    </button>
                     <div className="flex-1 overflow-hidden">
                       <p className="text-xs font-bold text-blue-400 truncate">{currentFolder}</p>
                       <p className="text-[10px] text-blue-400/60">{songs.length} tracks</p>
                     </div>
-                    <button onClick={resetFilter} className="text-blue-400 hover:text-white">
+                    <button onClick={resetFilter} className="text-blue-400 hover:text-white" title="Reset All">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1036,40 +1150,52 @@ export default function App() {
                 <div className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar">
                   {searchQuery === "" && (
                     <div className="mb-6 space-y-1">
-                      {visibleFolders.length > 0 && (
+                      {visibleFolders.length > 0 && !currentFolder?.includes('All Songs') && (
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
                           Folders / Categories
                         </div>
                       )}
-                      {visibleFolders.map(name => {
+                      {!currentFolder?.includes('All Songs') && visibleFolders.map(name => {
                         const folderSongs = folders.get(name) || [];
                         const isDriveFolder = folderSongs.some(s => s.isDrive);
-                        const displayName = name.split('/').pop();
+                        const isVirtual = name.includes('All Songs');
+                        const displayName = name === "All Local Songs" ? "All Songs" : name.split('/').pop();
+                        
                         return (
                           <button 
                             key={name}
                             onClick={() => selectFolder(name)}
                             className="w-full flex items-center gap-3 p-3 hover:bg-blue-600/10 text-white rounded-xl transition-all text-sm text-left group border border-transparent"
                           >
-                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${isDriveFolder ? 'bg-blue-500/10 group-hover:bg-blue-500/20' : 'bg-white/5 group-hover:bg-white/10'}`}>
-                              {isDriveFolder ? (
-                                <Cloud className={`w-5 h-5 ${currentFolder === name ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'}`} />
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
+                              isVirtual ? 'bg-amber-500/10 group-hover:bg-amber-500/20' : 
+                              isDriveFolder ? 'bg-blue-500/10 group-hover:bg-blue-500/20' : 
+                              'bg-white/5 group-hover:bg-white/10'
+                            }`}>
+                              {isVirtual ? (
+                                <Music className={`w-5 h-5 ${currentFolder === displayName ? 'text-amber-400' : 'text-gray-400 group-hover:text-amber-400'}`} />
+                              ) : isDriveFolder ? (
+                                <Cloud className={`w-5 h-5 ${currentFolder === displayName ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'}`} />
                               ) : (
-                                <FolderOpen className={`w-5 h-5 ${currentFolder === name ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'}`} />
+                                <FolderOpen className={`w-5 h-5 ${currentFolder === displayName ? 'text-blue-400' : 'text-gray-400 group-hover:text-blue-400'}`} />
                               )}
                             </div>
                             <div className="flex-1 truncate">
-                              <p className={`font-bold truncate transition-colors ${currentFolder === name ? 'text-blue-300' : 'group-hover:text-blue-300'}`}>{displayName}</p>
-                              <p className="text-[11px] text-gray-500">{folderSongs.length} tracks</p>
+                              <p className={`font-bold truncate transition-colors ${
+                                currentFolder === displayName ? (isVirtual ? 'text-amber-300' : 'text-blue-300') : 'group-hover:text-blue-300'
+                              }`}>{displayName}</p>
+                              <p className="text-[11px] text-gray-500">
+                                {isVirtual ? allSongs.filter(s => activeSource === 'cloud' ? s.isDrive : (!s.isDrive && (name === "All Local Songs" || s.path?.join('/').startsWith(name.replace(' (All Songs)', ''))))).length : folderSongs.length} tracks
+                              </p>
                             </div>
                           </button>
                         );
                       })}
-                      {!currentFolder && visibleFolders.length > 0 && (
+                      {currentFolder && !currentFolder.includes('All Songs') && visibleFolders.length > 0 && (
                         <>
                           <div className="border-b border-white/5 my-4 mx-2" />
                           <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                            All Tracks
+                            Tracks in Folder
                           </div>
                         </>
                       )}
@@ -1181,39 +1307,51 @@ export default function App() {
                   <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pb-12">
                     {searchQuery === "" && (
                       <div className="mb-6 space-y-2">
-                        {visibleFolders.length > 0 && (
+                        {visibleFolders.length > 0 && !currentFolder?.includes('All Songs') && (
                           <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest flex justify-between items-center">
                             <span>Folders / Categories</span>
                           </div>
                         )}
-                        {visibleFolders.map(name => {
+                        {!currentFolder?.includes('All Songs') && visibleFolders.map(name => {
                           const folderSongs = folders.get(name) || [];
                           const isDriveFolder = folderSongs.some(s => s.isDrive);
-                          const displayName = name.split('/').pop();
+                          const isVirtual = name.includes('All Songs');
+                          const displayName = name === "All Local Songs" ? "All Songs" : name.split('/').pop();
+
                           return (
                             <button 
                               key={name}
                               onClick={() => selectFolder(name)}
                               className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-blue-600/10 text-white rounded-2xl transition-all text-sm text-left group"
                             >
-                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${isDriveFolder ? 'bg-blue-500/10 group-hover:bg-blue-500/20' : 'bg-white/5 group-hover:bg-white/10'}`}>
-                                {isDriveFolder ? (
+                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
+                                isVirtual ? 'bg-amber-500/10 group-hover:bg-amber-500/20' :
+                                isDriveFolder ? 'bg-blue-500/10 group-hover:bg-blue-500/20' : 
+                                'bg-white/5 group-hover:bg-white/10'
+                              }`}>
+                                {isVirtual ? (
+                                  <Music className="w-6 h-6 text-gray-400 group-hover:text-amber-400" />
+                                ) : isDriveFolder ? (
                                   <Cloud className="w-6 h-6 text-gray-400 group-hover:text-blue-400" />
                                 ) : (
                                   <FolderOpen className="w-6 h-6 text-gray-400 group-hover:text-blue-400" />
                                 )}
                               </div>
                               <div className="flex-1 truncate">
-                                <p className="font-bold text-base truncate group-hover:text-blue-300 transition-colors">{displayName}</p>
-                                <p className="text-xs text-gray-500">{folderSongs.length} tracks</p>
+                                <p className={`font-bold text-base truncate group-hover:text-blue-300 transition-colors ${isVirtual ? 'text-amber-200' : ''}`}>{displayName}</p>
+                                <p className="text-xs text-gray-500">
+                                  {isVirtual ? allSongs.filter(s => activeSource === 'cloud' ? s.isDrive : (!s.isDrive && (name === "All Local Songs" || s.path?.join('/').startsWith(name.replace(' (All Songs)', ''))))).length : folderSongs.length} tracks
+                                </p>
                               </div>
                             </button>
                           );
                         })}
-                        {visibleFolders.length > 0 && <div className="border-b border-white/5 my-6" />}
-                        <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                          {currentFolder ? 'Tracks in Folder' : 'All Tracks'}
-                        </div>
+                        {currentFolder && !currentFolder.includes('All Songs') && visibleFolders.length > 0 && <div className="border-b border-white/5 my-6" />}
+                        {currentFolder && !currentFolder.includes('All Songs') && (
+                          <div className="px-1 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                            Tracks in Folder
+                          </div>
+                        )}
                       </div>
                     )}
                     {renderSongList()}
@@ -1414,44 +1552,71 @@ export default function App() {
             <span className="text-[10px] md:text-xs font-medium text-blue-500/70 w-10">{formatTime(duration)}</span>
           </div>
 
-          <div className="flex items-center gap-6 md:gap-10 mt-2">
-            <button 
-              onClick={() => {
-                const modes: ('normal' | 'shuffle' | 'repeat')[] = ['normal', 'shuffle', 'repeat'];
-                const nextMode = modes[(modes.indexOf(playbackMode) + 1) % modes.length];
-                setPlaybackMode(nextMode);
-              }}
-              className={`p-2 rounded-full transition-all flex items-center justify-center relative ${playbackMode !== 'normal' ? 'bg-[#0070f3]/20 text-[#0070f3]' : 'text-gray-500 hover:text-white'}`}
-              title={playbackMode === 'shuffle' ? 'Shuffle' : playbackMode === 'repeat' ? 'Repeat' : 'Normal'}
-            >
-              {playbackMode === 'repeat' ? <Repeat className="w-5 h-5 md:w-6 md:h-6" /> : <Shuffle className="w-5 h-5 md:w-6 md:h-6" />}
-            </button>
+          <div className="flex items-center gap-6 md:gap-10 mt-2 relative w-full justify-center">
+            <div className="flex items-center gap-6 md:gap-10">
+              <button 
+                onClick={() => {
+                  const modes: ('normal' | 'shuffle' | 'repeat')[] = ['normal', 'shuffle', 'repeat'];
+                  const nextMode = modes[(modes.indexOf(playbackMode) + 1) % modes.length];
+                  setPlaybackMode(nextMode);
+                }}
+                className={`p-2 rounded-full transition-all flex items-center justify-center relative ${playbackMode !== 'normal' ? 'bg-[#0070f3]/20 text-[#0070f3]' : 'text-gray-500 hover:text-white'}`}
+                title={playbackMode === 'shuffle' ? 'Shuffle' : playbackMode === 'repeat' ? 'Repeat' : 'Normal'}
+              >
+                {playbackMode === 'shuffle' ? <Shuffle className="w-5 h-5 md:w-6 md:h-6" /> : <Repeat className="w-5 h-5 md:w-6 md:h-6" />}
+              </button>
 
-            <button 
-              onClick={prevSong}
-              className="text-[#0070f3] hover:scale-110 transition-transform p-1 drop-shadow-[0_0_8px_rgba(0,112,243,0.5)]"
-            >
-              <SkipBack className="w-6 h-6 md:w-8 md:h-8 fill-current" />
-            </button>
-            <button 
-              onClick={togglePlay}
-              className="w-12 h-12 md:w-16 md:h-16 border-2 border-[#0070f3]/40 text-[#0070f3] rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all bg-[#0070f3]/5 shadow-[0_0_20px_rgba(0,112,243,0.2)]"
-            >
-              {isPlaying ? <Pause className="w-6 h-6 md:w-8 md:h-8 fill-current" /> : <Play className="w-6 h-6 md:w-8 md:h-8 fill-current ml-1" />}
-            </button>
-            <button 
-              onClick={nextSong}
-              className="text-[#0070f3] hover:scale-110 transition-transform p-1 drop-shadow-[0_0_8px_rgba(0,112,243,0.5)]"
-            >
-              <SkipForward className="w-6 h-6 md:w-8 md:h-8 fill-current" />
-            </button>
-            <button 
-              onClick={handleReplay}
-              className="text-[#0070f3]/60 hover:text-[#0070f3] transition-colors"
-              title="Replay"
-            >
-              <RotateCcw className="w-4 h-4 md:w-5 md:h-5" />
-            </button>
+              <button 
+                onClick={prevSong}
+                className="text-[#0070f3] hover:scale-110 transition-transform p-1 drop-shadow-[0_0_8px_rgba(0,112,243,0.5)]"
+              >
+                <SkipBack className="w-6 h-6 md:w-8 md:h-8 fill-current" />
+              </button>
+              <button 
+                onClick={togglePlay}
+                className="w-12 h-12 md:w-16 md:h-16 border-2 border-[#0070f3]/40 text-[#0070f3] rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all bg-[#0070f3]/5 shadow-[0_0_20px_rgba(0,112,243,0.2)]"
+              >
+                {isPlaying ? <Pause className="w-6 h-6 md:w-8 md:h-8 fill-current" /> : <Play className="w-6 h-6 md:w-8 md:h-8 fill-current ml-1" />}
+              </button>
+              <button 
+                onClick={nextSong}
+                className="text-[#0070f3] hover:scale-110 transition-transform p-1 drop-shadow-[0_0_8px_rgba(0,112,243,0.5)]"
+              >
+                <SkipForward className="w-6 h-6 md:w-8 md:h-8 fill-current" />
+              </button>
+              <button 
+                onClick={handleReplay}
+                className="p-2 text-[#0070f3]/60 hover:text-[#0070f3] transition-colors"
+                title="Replay"
+              >
+                <RotateCcw className="w-5 h-5 md:w-6 md:h-6" />
+              </button>
+            </div>
+
+            {/* Volume Control - Desktop Right */}
+            <div className="hidden md:flex items-center gap-3 absolute right-0 group">
+              <button 
+                onClick={toggleMute}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : volume < 0.5 ? <Volume1 className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+              <div className="w-24 h-1 bg-white/10 rounded-full relative overflow-hidden group-hover:bg-white/20 transition-colors">
+                <input 
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  className="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
+                />
+                <motion.div 
+                  className="absolute inset-y-0 left-0 bg-blue-500"
+                  style={{ width: `${(isMuted ? 0 : volume) * 100}%` }}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </footer>
