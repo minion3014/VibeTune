@@ -670,7 +670,6 @@ export default function App() {
     setCurrentFolder(null);
     setSearchQuery('');
     setSongs([]);
-    setFilteredSongsDisplay([]);
   };
 
   const goBack = () => {
@@ -693,11 +692,15 @@ export default function App() {
   const songSuggestions = useMemo(() => {
     if (!searchQuery) return [];
     const lowerQuery = searchQuery.toLowerCase();
-    return allSongs.filter(s => 
-      s.name.toLowerCase().includes(lowerQuery) || 
-      s.artist.toLowerCase().includes(lowerQuery)
-    ).slice(0, 10);
-  }, [searchQuery, allSongs]);
+    return allSongs.filter(s => {
+      // Filter by active source
+      const matchesSource = activeSource === 'cloud' ? s.isDrive : !s.isDrive;
+      if (!matchesSource) return false;
+      
+      return s.name.toLowerCase().includes(lowerQuery) || 
+             s.artist.toLowerCase().includes(lowerQuery);
+    }).slice(0, 10);
+  }, [searchQuery, allSongs, activeSource]);
 
   const playAudio = async () => {
     const audio = audioRef.current;
@@ -815,12 +818,17 @@ export default function App() {
     });
   }, [currentSong, currentTime]);
 
-  const filteredSongsDisplay = songs.filter(s => {
-    const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase());
-    if (activeSource === 'cloud') return matchesSearch && s.isDrive;
-    if (activeSource === 'local') return matchesSearch && !s.isDrive;
-    return matchesSearch;
-  });
+  const filteredSongsDisplay = useMemo(() => {
+    const songsToFilter = (!currentFolder && searchQuery !== "") 
+      ? allSongs.filter(s => activeSource === 'cloud' ? s.isDrive : !s.isDrive)
+      : songs;
+
+    return songsToFilter.filter(s => {
+      const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                           s.artist.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesSearch;
+    });
+  }, [songs, allSongs, searchQuery, currentFolder, activeSource]);
 
   const formatTime = (time: number) => {
     const mins = Math.floor(time / 60);
@@ -829,7 +837,7 @@ export default function App() {
   };
 
   const renderSongList = () => {
-    if (!currentFolder && activeSource) return null;
+    if (!currentFolder && activeSource && searchQuery === "") return null;
     if (filteredSongsDisplay.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-20 text-gray-500 text-center p-6 bg-white/5 border border-dashed border-white/10 rounded-2xl mx-1">
@@ -1016,10 +1024,12 @@ export default function App() {
                               <button 
                                 key={song.id}
                                 onClick={() => {
-                                  // Search globally across all songs
-                                  const index = allSongs.indexOf(song);
-                                  setSongs(allSongs);
-                                  setCurrentFolder(null);
+                                  // Search within the current active source
+                                  const sourceSongs = allSongs.filter(s => activeSource === 'cloud' ? s.isDrive : !s.isDrive);
+                                  const index = sourceSongs.findIndex(s => s.id === song.id);
+                                  setSongs(sourceSongs);
+                                  // If at root, stay at root but show "Search Results" or similar as virtual folder
+                                  setCurrentFolder(activeSource === 'cloud' ? "Cloud All Songs" : "Local All Songs");
                                   setCurrentSongIndex(index);
                                   setIsPlaying(true);
                                   setSearchQuery('');
@@ -1242,49 +1252,51 @@ export default function App() {
                 className="md:hidden fixed bottom-0 left-0 right-0 h-[85vh] bg-[#0c0c0c] border-t border-white/10 z-[160] flex flex-col rounded-t-[32px] shadow-2xl overflow-hidden"
               >
                 <div 
-                  className="flex justify-center pt-3 pb-3 cursor-grab active:cursor-grabbing touch-none"
+                  className="cursor-grab active:cursor-grabbing touch-none"
                   onPointerDown={(e) => dragControls.start(e)}
                 >
-                  <div className="w-12 h-1.5 bg-white/20 rounded-full" />
-                </div>
-
-                <div className="pl-8 pr-4 py-6 flex items-center justify-between">
-                  <div className="flex-1 overflow-hidden pr-6">
-                    {activeSource === 'cloud' && isGoogleLinked && googleUser ? (
-                      <div className="flex items-center gap-4">
-                        <img src={googleUser.picture} className="w-14 h-14 rounded-full border-2 border-blue-500/30 shadow-lg" alt="" referrerPolicy="no-referrer" />
-                        <div className="overflow-hidden">
-                          <p className="font-black text-blue-400 text-lg uppercase leading-none truncate">{googleUser.name}</p>
-                          <p className="text-[9px] text-blue-400/50 font-bold uppercase tracking-widest mt-1.5">Cloud Connected</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 bg-blue-500/10 rounded-full flex items-center justify-center border-2 border-blue-500/20">
-                          <ListMusic className="w-7 h-7 text-blue-400" />
-                        </div>
-                        <div className="overflow-hidden">
-                          <p className="font-black text-white text-lg uppercase leading-none truncate">Library</p>
-                          <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-1.5">{activeSource === 'local' && rootFolderName ? 'Local Folder' : 'Select Source'}</p>
-                        </div>
-                      </div>
-                    )}
+                  <div className="flex justify-center pt-3 pb-3">
+                    <div className="w-12 h-1.5 bg-white/20 rounded-full" />
                   </div>
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={switchToCloudSource}
-                      className={`p-3 rounded-2xl transition-colors ${activeSource === 'cloud' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
-                      title="Cloud"
-                    >
-                      <Cloud className={`w-6 h-6 ${isLoadingDrive ? 'animate-pulse' : ''}`} />
-                    </button>
-                    <button 
-                      onClick={switchToLocalSource}
-                      className={`p-3 rounded-2xl transition-colors ${activeSource === 'local' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
-                      title="Local"
-                    >
-                      <FolderOpen className="w-6 h-6" />
-                    </button>
+
+                  <div className="pl-8 pr-4 py-6 flex items-center justify-between">
+                    <div className="flex-1 overflow-hidden pr-6">
+                      {activeSource === 'cloud' && isGoogleLinked && googleUser ? (
+                        <div className="flex items-center gap-4">
+                          <img src={googleUser.picture} className="w-14 h-14 rounded-full border-2 border-blue-500/30 shadow-lg" alt="" referrerPolicy="no-referrer" />
+                          <div className="overflow-hidden">
+                            <p className="font-black text-blue-400 text-lg uppercase leading-none truncate">{googleUser.name}</p>
+                            <p className="text-[9px] text-blue-400/50 font-bold uppercase tracking-widest mt-1.5">Cloud Connected</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-4">
+                          <div className="w-14 h-14 bg-blue-500/10 rounded-full flex items-center justify-center border-2 border-blue-500/20">
+                            <ListMusic className="w-7 h-7 text-blue-400" />
+                          </div>
+                          <div className="overflow-hidden">
+                            <p className="font-black text-white text-lg uppercase leading-none truncate">Library</p>
+                            <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-1.5">{activeSource === 'local' && rootFolderName ? 'Local Folder' : 'Select Source'}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3" onPointerDown={e => e.stopPropagation()}>
+                      <button 
+                        onClick={switchToCloudSource}
+                        className={`p-3 rounded-2xl transition-colors ${activeSource === 'cloud' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
+                        title="Cloud"
+                      >
+                        <Cloud className={`w-6 h-6 ${isLoadingDrive ? 'animate-pulse' : ''}`} />
+                      </button>
+                      <button 
+                        onClick={switchToLocalSource}
+                        className={`p-3 rounded-2xl transition-colors ${activeSource === 'local' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-400'}`}
+                        title="Local"
+                      >
+                        <FolderOpen className="w-6 h-6" />
+                      </button>
+                    </div>
                   </div>
                 </div>
 
