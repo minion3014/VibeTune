@@ -994,7 +994,7 @@ export default function App() {
             value={searchQuery}
             onFocus={handleSearchFocus}
             onChange={handleSearchChange}
-            className="bg-white/5 border border-white/10 rounded-full py-2 md:py-2.5 pl-10 pr-4 w-full focus:outline-none focus:ring-2 focus:ring-[#0070f3]/50 focus:bg-white/10 transition-all text-sm shadow-inner"
+            className="bg-white/5 border border-white/10 rounded-full py-2 md:py-2.5 pl-10 pr-4 w-full focus:outline-none focus:ring-2 focus:ring-[#0070f3]/50 focus:bg-white/10 transition-all text-base shadow-inner"
           />
           
           <AnimatePresence>
